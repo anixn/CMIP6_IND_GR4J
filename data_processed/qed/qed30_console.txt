@@ -1,0 +1,8 @@
+﻿Rscript : [WARNING] Deprecated: --mathjax. Use --math-method=mathjax[:URL] instead.
+At line:1 char:1
++ Rscript -e "rmarkdown::render('QED_30_rank_and_report.Rmd', output_fo ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: ([WARNING] Depre...[:URL] instead.:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+NOTEBOOK 30 COMPLETE

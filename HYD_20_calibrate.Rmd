@@ -1,0 +1,177 @@
+---
+title: "HYD 20 -- GR4J calibration & validation on observed data"
+subtitle: "CAMELS-India discharge simulation workflow, notebook 2 of 2"
+output:
+   html_document:
+      css: style_academic.css
+---
+
+```{r source-setup, include=FALSE}
+knitr::purl("HYD_00_setup.Rmd", file.path(tempdir(), "hyd00_setup.R"), documentation = 2)
+source(file.path(tempdir(), "hyd00_setup.R"))
+```
+
+# Notebook 20 -- Calibrate GR4J per catchment
+
+**What this notebook does.** For every prepared catchment (Tier 1/2):
+
+1. Builds an airGR `InputsModel` from the daily table produced by HYD_10
+   (precipitation in mm/day, PET in mm/day).
+2. Runs **GR4J** over the full 1981-2014 period with a 1-year warm-up, and
+   calibrates the 4 parameters on the **calibration window**
+   `r format(hyd_calib_start)` .. `r format(hyd_calib_end)` with
+   `Calibration_Michel` (local-search optimisation of KGE in mm/day).
+3. Evaluates **out-of-sample** on the validation window
+   `r format(hyd_valid_start)` .. `r format(hyd_valid_end)`: KGE, NSE and
+   PBIAS (PBIAS computed manually -- airGR has no such criterion).
+4. Saves parameters (`params/<id>.rds`) and a diagnostics table
+   (`hyd_calib_summary.csv`).
+
+Discharge stays in model space (mm/day) throughout; convert with
+`Q[m3/s] = Q[mm/d] * Area[km2] / 86.4` when presenting results.
+
+```{r log-file}
+hyd_log_file <- file.path(hyd_output_dir, "hyd_20_log.txt")
+dir.create(file.path(hyd_output_dir, "params"), showWarnings = FALSE)
+```
+
+## 1. Roster (only catchments with prepared inputs)
+
+```{r roster}
+roster <- data.table::fread(file.path(hyd_output_dir, "hyd_inputs_summary.csv"),
+                            colClasses = list(character = "id"))
+if (hyd_test_mode) roster <- roster[id %in% hyd_test_ids]
+cat("Catchments to calibrate:", nrow(roster), "\n")
+```
+
+## 2. Calibrate + validate
+
+```{r calibrate}
+idx <- function(d) which(full_dates >= d & full_dates <= d)
+full_dates <- seq(hyd_period_start, hyd_period_end, by = "day")
+
+# Warm-up = first `hyd_warmup_days` days of the full series (1981); the run
+# starts the day after. NOTE: airGR silently ignores a warm-up that overlaps
+# the run window, so IndPeriod_Run must start AFTER the warm-up indices.
+i_warm     <- seq(1L, hyd_warmup_days)                       # 1981-01-01 .. 1981-12-31
+i_run_cal  <- seq(1L, idx(hyd_calib_end))[-i_warm]           # 1982-01-01 .. 2000-12-31
+i_run_full <- seq(1L, idx(hyd_period_end))[-i_warm]          # 1982-01-01 .. 2014-12-31
+i_val      <- idx(hyd_valid_start):idx(hyd_valid_end)        # 2001-01-01 .. 2014-12-31
+
+calib_opts <- airGR::CreateCalibOptions(FUN_MOD = airGR::RunModel_GR4J)
+
+calib_rows <- list(); n_row <- 0L
+
+for (i in seq_len(nrow(roster))) {
+   id <- roster$id[i]
+   res <- tryCatch({
+      dt <- data.table::fread(file.path(hyd_inputs_dir, paste0(id, "_obs.csv")))
+
+      # calibration needs observed Q inside the calibration run window
+      if (sum(!is.na(dt$Qobs_mm[i_run_cal])) < 3650) {
+         calib_rows[[n_row <- n_row + 1L]] <- data.frame(
+            id, status = "skipped_less_than_3650_valid_Q_in_calib")
+         next
+      }
+
+      inputs <- airGR::CreateInputsModel(
+         FUN_MOD = airGR::RunModel_GR4J,
+         DatesR  = as.POSIXct(dt$date),
+         Precip  = dt$P_mm,
+         PotEvap = dt$PET_mm)
+
+      # 1) calibration run window = calibration years ONLY (no data leakage)
+      run_opt_calib <- airGR::CreateRunOptions(
+         FUN_MOD          = airGR::RunModel_GR4J,
+         InputsModel      = inputs,
+         IndPeriod_WarmUp = i_warm,
+         IndPeriod_Run    = i_run_cal)
+
+      crit_calib <- airGR::CreateInputsCrit(
+         FUN_CRIT     = airGR::ErrorCrit_KGE,
+         InputsModel  = inputs,
+         RunOptions   = run_opt_calib,
+         VarObs       = "Q",
+         Obs          = dt$Qobs_mm[i_run_cal])
+
+      calib <- airGR::Calibration_Michel(inputs, run_opt_calib, crit_calib,
+                                         calib_opts,
+                                         FUN_MOD = airGR::RunModel_GR4J,
+                                         FUN_CRIT = airGR::ErrorCrit_KGE)
+
+      # 2) evaluation run = continuous 1982-2014 with the calibrated params
+      run_opt_full <- airGR::CreateRunOptions(
+         FUN_MOD          = airGR::RunModel_GR4J,
+         InputsModel      = inputs,
+         IndPeriod_WarmUp = i_warm,
+         IndPeriod_Run    = i_run_full)
+
+      outputs <- airGR::RunModel(inputs, run_opt_full,
+                                 Param = calib$ParamFinalR,
+                                 FUN_MOD = airGR::RunModel_GR4J)
+
+      sim_mm <- outputs$Qsim
+      # Qsim is indexed within the run window (starts after the warm-up), so
+      # simulation indices = calendar indices - warm-up length
+      o_cal  <- dt$Qobs_mm[i_run_cal]
+      s_cal  <- sim_mm[i_run_cal - hyd_warmup_days]
+      o_val  <- dt$Qobs_mm[i_val]
+      s_val  <- sim_mm[i_val - hyd_warmup_days]
+
+      kge_calc <- function(o, s) {
+         keep <- !is.na(o) & !is.na(s)
+         o <- o[keep]; s <- s[keep]
+         if (length(o) < 365 || sd(o) == 0) return(NA_real_)
+         r <- cor(o, s)
+         alpha <- sd(s) / sd(o)
+         beta  <- mean(s) / mean(o)
+         1 - sqrt((r - 1)^2 + (alpha - 1)^2 + (beta - 1)^2)
+      }
+      nse_calc <- function(o, s) {
+         keep <- !is.na(o) & !is.na(s)
+         o <- o[keep]; s <- s[keep]
+         1 - sum((s - o)^2) / sum((o - mean(o))^2)
+      }
+      pbias_calc <- function(o, s) {
+         keep <- !is.na(o) & !is.na(s)
+         100 * (sum(s[keep] - o[keep]) / sum(o[keep]))
+      }
+
+      calib_rows[[n_row <- n_row + 1L]] <- data.frame(
+         id, status = "calibrated",
+         kge_calib = round(kge_calc(o_cal, s_cal), 3),
+         nse_calib = round(nse_calc(o_cal, s_cal), 3),
+         kge_valid = round(kge_calc(o_val, s_val), 3),
+         nse_valid = round(nse_calc(o_val, s_val), 3),
+         pbias_valid = round(pbias_calc(o_val, s_val), 2),
+         param_x1 = round(calib$ParamFinalR[1], 1),
+         param_x2 = round(calib$ParamFinalR[2], 1),
+         param_x3 = round(calib$ParamFinalR[3], 2),
+         param_x4 = round(calib$ParamFinalR[4], 3))
+      saveRDS(list(id = id, param = calib$ParamFinalR, area_km2 = roster$area_km2[i]),
+              file.path(hyd_output_dir, "params", paste0(id, ".rds")))
+      "ok"
+   }, error = function(e) {
+      hyd_log(paste("ERROR", id, conditionMessage(e)), hyd_log_file)
+      paste("error:", conditionMessage(e))
+   })
+}
+
+hyd_calib_summary <- data.table::rbindlist(calib_rows, fill = TRUE)
+data.table::fwrite(hyd_calib_summary,
+                   file.path(hyd_output_dir, "hyd_calib_summary.csv"))
+print(table(hyd_calib_summary$status))
+print(summary(hyd_calib_summary$kge_valid))
+hyd_log(paste0("HYD_20 done: ", sum(hyd_calib_summary$status == "calibrated"),
+               " calibrated"), hyd_log_file)
+```
+
+## 3. Interpretation guide
+
+- `kge_valid` is the headline number: performance on years the model never saw
+  during calibration.
+- GR4J parameters (airGR units): X1 = production store capacity (mm),
+  X2 = inter-catchment exchange coefficient (mm/day), X3 = routing store
+  capacity (mm), X4 = unit hydrograph time base (days).
+- Per your manuscript, median out-of-sample KGE around 0.6 for Indian
+  catchments is expected; individual catchments will vary widely.

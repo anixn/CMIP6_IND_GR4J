@@ -1,0 +1,143 @@
+---
+title: "HYD 10 -- Build model-ready daily inputs (pr, PET, observed Q)"
+subtitle: "CAMELS-India discharge simulation workflow, notebook 1 of 2"
+output:
+   html_document:
+      css: style_academic.css
+---
+
+```{r source-setup, include=FALSE}
+knitr::purl("HYD_00_setup.Rmd", file.path(tempdir(), "hyd00_setup.R"), documentation = 2)
+source(file.path(tempdir(), "hyd00_setup.R"))
+```
+
+# Notebook 10 -- Time-series preparation
+
+**What this notebook does.** For every catchment that passed the QED tiering
+(Tier 1/2, forcing QA passed) it builds one **model-ready daily table** per
+catchment, `model_inputs/<id>_obs.csv`:
+
+| column | meaning | source |
+|---|---|---|
+| `date` | daily index | full 1981-2014 calendar |
+| `P_mm` | observed precipitation (mm/day) | CAMELS-IND catchment-mean forcing |
+| `Tmean_C` | daily mean temperature (degC) | mean of tmax/tmin |
+| `PET_mm` | potential evapotranspiration (mm/day) | Oudin (2005) from Tmean + latitude |
+| `Qobs_m3s` | observed discharge (m3/s) | CAMELS-IND streamflow |
+| `Qobs_mm` | observed discharge in model space (mm/day) | Q x 86.4 / area(km2) |
+
+PET choice: **Oudin (2005)** -- needs only daily mean temperature and latitude
+(both available), is the standard PET for GR models, and equals the PET used
+with GR4J across Indian lumped-model studies. A Hargreaves-Samani alternative
+is implemented in `HYD_00_setup.Rmd` (`hyd_pet_hargreaves`) -- switch
+`hyd_pet_method` there to compare.
+
+```{r log-file}
+hyd_log_file <- file.path(hyd_output_dir, "hyd_10_log.txt")
+```
+
+## 1. Catchment roster from the QED inventory
+
+```{r roster}
+inv <- data.table::fread(file.path(hyd_qed_dir, "inventory.csv"),
+                         colClasses = list(character = "id"))
+roster <- inv[final_action %in% hyd_ok_tiers]
+
+topo <- data.table::fread(hyd_topo_fp, colClasses = list(character = "gauge_id"))
+topo[, id := hyd_normalize_id(gauge_id)]
+roster <- merge(roster, topo[, .(id, cwc_lat, cwc_area)], by = "id", all.x = TRUE)
+
+missing_area <- roster$id[is.na(roster$cwc_area)]
+if (length(missing_area)) {
+   data.table::fwrite(data.frame(id = missing_area,
+                                 reason = "no cwc_area in topo attributes"),
+                      file.path(hyd_output_dir, "hyd_skipped_no_area.csv"))
+   hyd_log(paste("skipped (no area):", paste(missing_area, collapse = ",")),
+           hyd_log_file)
+   roster <- roster[!is.na(cwc_area)]
+}
+if (hyd_test_mode) roster <- roster[id %in% hyd_test_ids]
+cat("Catchments to prepare:", nrow(roster), "\n")
+```
+
+## 2. Build the daily input tables
+
+```{r build-inputs}
+n_days <- as.integer(hyd_period_end - hyd_period_start) + 1L
+stopifnot(n_days == 12418L)
+full_dates <- seq(hyd_period_start, hyd_period_end, by = "day")
+
+summary_rows <- list(); n_row <- 0L
+
+for (i in seq_len(nrow(roster))) {
+   id <- roster$id[i]
+   res <- tryCatch({
+      f  <- hyd_read_forcing(file.path(hyd_forcing_dir, paste0(id, ".csv")))
+      f  <- f[date >= hyd_period_start & date <= hyd_period_end]
+      q  <- hyd_read_q_obs(id)
+      q  <- q[date >= hyd_period_start & date <= hyd_period_end]
+
+      dt <- merge(f[, .(date, P_mm = `prcp(mm/day)`,
+                        tmax = `tmax(C)`, tmin = `tmin(C)`)],
+                  q, by = "date", all.x = TRUE)
+      data.table::setnames(dt, "q_m3s", "Qobs_m3s")
+      data.table::setkey(dt, date)
+
+      # daily mean temperature (degC)
+      dt[, Tmean_C := (tmax + tmin) / 2]
+
+      # PET: Oudin via airGR (mm/day). JD = day-of-year, Lat in degrees.
+      if (hyd_pet_method == "oudin") {
+         dt[, PET_mm := airGR::PE_Oudin(JD = as.integer(format(date, "%j")),
+                                        Temp = Tmean_C,
+                                        Lat = roster$cwc_lat[i],
+                                        LatUnit = "deg")]
+      } else {
+         dt[, PET_mm := hyd_pet_hargreaves(as.integer(format(date, "%j")),
+                                           tmax, tmin, roster$cwc_lat[i])]
+      }
+
+      # observed discharge into model space (mm/day)
+      dt[, Qobs_mm := Qobs_m3s * hyd_m3s_to_mm_factor / roster$cwc_area[i]]
+
+      # pad to the full daily index (absent rows -> NA, never silently dropped)
+      out <- data.table::data.table(date = full_dates)
+      out <- merge(out, dt[, .(date, P_mm, Tmean_C, PET_mm, Qobs_m3s, Qobs_mm)],
+                   by = "date", all.x = TRUE)
+      data.table::fwrite(out, file.path(hyd_inputs_dir, paste0(id, "_obs.csv")))
+
+      summary_rows[[n_row <- n_row + 1L]] <- data.frame(
+         id, area_km2 = roster$cwc_area[i],
+         n_valid_Q = sum(!is.na(out$Qobs_mm)),
+         n_valid_P = sum(!is.na(out$P_mm)),
+         PET_mm_yr = round(sum(out$PET_mm, na.rm = TRUE) / (n_days / 365.25), 0))
+      "ok"
+   }, error = function(e) {
+      hyd_log(paste("ERROR", id, conditionMessage(e)), hyd_log_file)
+      paste("error:", conditionMessage(e))
+   })
+}
+
+hyd_summary <- data.table::rbindlist(summary_rows)
+data.table::fwrite(hyd_summary, file.path(hyd_output_dir, "hyd_inputs_summary.csv"))
+cat("prepared:", nrow(hyd_summary), "catchments\n")
+print(hyd_summary)
+```
+
+## 3. Sanity checks
+
+```{r checks}
+# PET should be positive and seasonal; P and Q in plausible mm ranges
+stopifnot(all(hyd_summary$PET_mm_yr > 500 & hyd_summary$PET_mm_yr < 2500))
+stopifnot(all(hyd_summary$n_valid_P == n_days))   # CAMELS forcings complete
+ok_Q <- hyd_summary[id %in% roster[id %in% hyd_summary$id]$id]
+cat("valid-Q days range:", min(ok_Q$n_valid_Q), "-", max(ok_Q$n_valid_Q), "\n")
+hyd_log(paste0("HYD_10 done: ", nrow(hyd_summary), " catchments prepared"), hyd_log_file)
+```
+
+## Take-away
+
+One table per catchment under `data_processed/hyd/model_inputs/`, ready for
+`HYD_20_calibrate.Rmd` (GR4J calibration on observed data) and for the
+future-climate simulation notebooks that will feed the bias-corrected SSP
+series through the same format.

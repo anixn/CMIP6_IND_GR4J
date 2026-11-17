@@ -1,0 +1,4 @@
+set_a,set_b,n_a,n_b,in_a_not_b,in_b_not_a,identical
+streamflow,forcings,472,472,"","",TRUE
+streamflow,shapefile,472,472,"","",TRUE
+shapefile,forcings,472,472,"","",TRUE

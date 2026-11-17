@@ -1,0 +1,10 @@
+2026-11-16 14:36:17 START QED_10_inventory_tiers.Rmd 
+2026-11-16 14:37:01 START QED_10_inventory_tiers.Rmd 
+2026-11-16 14:38:08 START QED_10_inventory_tiers.Rmd 
+2026-11-16 14:38:53 DONE  QED_10_inventory_tiers.Rmd in 0.75 min
+2026-11-16 14:38:53 START QED_20_qm_fit_apply.Rmd 
+2026-11-16 16:15:20 START QED_10_inventory_tiers.Rmd 
+2026-11-16 16:16:24 DONE  QED_10_inventory_tiers.Rmd in 1.05 min
+2026-11-16 16:16:24 START QED_20_qm_fit_apply.Rmd 
+2026-11-16 16:42:56 DONE  QED_20_qm_fit_apply.Rmd in 26.54 min
+2026-11-16 16:42:56 START QED_30_rank_and_report.Rmd 

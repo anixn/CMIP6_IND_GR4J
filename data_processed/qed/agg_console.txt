@@ -1,0 +1,8 @@
+﻿Rscript : [WARNING] Deprecated: --mathjax. Use --math-method=mathjax[:URL] instead.
+At line:1 char:1
++ Rscript -e "rmarkdown::render('QED_05_aggregate_cmip6.Rmd', output_fo ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: ([WARNING] Depre...[:URL] instead.:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+AGGREGATION COMPLETE

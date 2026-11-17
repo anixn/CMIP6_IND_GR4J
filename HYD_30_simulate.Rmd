@@ -1,0 +1,268 @@
+---
+title: "HYD 30 -- Simulate discharge with bias-corrected CMIP6 forcings & rank models"
+subtitle: "CAMELS-India discharge simulation workflow, notebook 3 of 3"
+output:
+   html_document:
+      css: style_academic.css
+---
+
+```{r source-setup, include=FALSE}
+knitr::purl("HYD_00_setup.Rmd", file.path(tempdir(), "hyd00_setup.R"), documentation = 2)
+source(file.path(tempdir(), "hyd00_setup.R"))
+```
+
+# Notebook 30 -- CMIP6-driven discharge simulation & model ranking
+
+**What this notebook does.** Every catchment that was calibrated in HYD_20 is
+now driven with each of the 22 bias-corrected CMIP6 historical series
+(`qm_corrected/<model>/<tier>/<id>_<var>.csv`, produced by QED_30) instead of
+the observed CAMELS forcing:
+
+1. Reads corrected `pr`, `tasmax`, `tasmin` (+ the `method_flag` column so
+   **every extrapolated value is counted**, never silently used).
+2. Builds daily `PET` with the same method as calibration (Oudin from corrected
+   temperatures + catchment latitude).
+3. Runs **GR4J with the catchment's calibrated parameters** (warm-up 1981,
+   run 1982-2014), and scores simulated vs observed discharge over the
+   **out-of-sample evaluation window 2001-2014** (KGE, NSE, PBIAS).
+4. Ranks models per catchment on KGE / NSE / |PBIAS|, then aggregates rank
+   sums across catchments into a composite discharge-based ranking that
+   complements the forcing-based ranking from QED_30.
+
+Rationale: a model can look good as *bias-corrected forcing* but still produce
+poor *discharge* (seasonality errors that KGE on daily values does not fully
+cancel). This notebook closes that gap before the SSP download shortlist is
+finalized.
+
+```{r log-file}
+hyd_log_file <- file.path(hyd_output_dir, "hyd_30_log.txt")
+```
+
+## 1. Roster: calibrated catchments + their QED tier
+
+```{r roster}
+calib <- data.table::fread(file.path(hyd_output_dir, "hyd_calib_summary.csv"),
+                           colClasses = list(character = "id"))
+roster <- calib[status == "calibrated"]
+
+inv <- data.table::fread(file.path(hyd_qed_dir, "inventory.csv"),
+                         colClasses = list(character = "id"))
+roster <- merge(roster, inv[, .(id, tier = final_action)],
+                by = "id", all.x = TRUE)
+
+# params saved by HYD_20; latitude lookup from topo attributes
+params_dir <- file.path(hyd_output_dir, "params")
+roster <- roster[file.exists(file.path(params_dir, paste0(id, ".rds")))]
+
+topo <- data.table::fread(hyd_topo_fp, colClasses = list(character = "gauge_id"))
+topo[, id := hyd_normalize_id(gauge_id)]
+roster <- merge(roster, topo[, .(id, cwc_lat)], by = "id", all.x = TRUE)
+
+cat("Calibrated catchments to simulate:", nrow(roster), "\n")
+print(table(roster$tier))
+```
+
+## 2. Model list (QED composite ranking order)
+
+```{r models}
+ranking <- data.table::fread(file.path(hyd_qed_dir, "model_ranking_overall.csv"))
+model_ranking <- ranking$model                     # already sorted best -> worst
+models <- model_ranking[sapply(model_ranking, function(m) {
+   dir.exists(file.path(hyd_qm_corr_dir, m))
+})]
+cat("Models with corrected series:", length(models), "\n")
+```
+
+## 3. Simulate every model on every calibrated catchment
+
+```{r simulate}
+# evaluation-window indices (same as HYD_20)
+full_dates <- seq(hyd_period_start, hyd_period_end, by = "day")
+i_warm     <- seq(1L, hyd_warmup_days)
+i_run_full <- seq(1L, length(full_dates))[-i_warm]
+i_eval     <- which(full_dates >= hyd_valid_start &
+                    full_dates <= hyd_valid_end)
+
+kge_calc <- function(o, s) {
+   keep <- !is.na(o) & !is.na(s)
+   o <- o[keep]; s <- s[keep]
+   if (length(o) < 365 || sd(o) == 0) return(NA_real_)
+   r <- cor(o, s); a <- sd(s) / sd(o); b <- mean(s) / mean(o)
+   1 - sqrt((r - 1)^2 + (a - 1)^2 + (b - 1)^2)
+}
+nse_calc <- function(o, s) {
+   keep <- !is.na(o) & !is.na(s); o <- o[keep]; s <- s[keep]
+   1 - sum((s - o)^2) / sum((o - mean(o))^2)
+}
+pbias_calc <- function(o, s) {
+   keep <- !is.na(o) & !is.na(s)
+   100 * (sum(s[keep] - o[keep]) / sum(o[keep]))
+}
+
+# linear gapfill for a numeric vector (only short interior gaps survive)
+zoo_gapfill <- function(x) {
+   i_na <- which(is.na(x))
+   if (length(i_na) == 0) return(x)
+   x[i_na] <- approx(seq_along(x), x, xout = i_na, rule = 2)$y
+   x
+}
+
+# read one corrected series: date, corrected_value, method_flag
+hyd_read_corrected <- function(model, tier, id, var) {
+   dt <- data.table::fread(file.path(hyd_qm_corr_dir, model, tier,
+                                     paste0(id, "_", var, ".csv")),
+                           select = c("date", "corrected_value", "method_flag"))
+   data.table::setnames(dt, "corrected_value", var)
+   data.table::setnames(dt, "method_flag", paste0("flag_", var))
+   dt
+}
+
+sim_rows <- list(); n_row <- 0L
+
+for (i in seq_len(nrow(roster))) {
+   id <- roster$id[i]; tier <- roster$tier[i]; lat <- roster$cwc_lat[i]
+   r_pr <- tryCatch({
+      # observed reference table (has Qobs_mm + area/lat via roster)
+      obs <- data.table::fread(file.path(hyd_inputs_dir, paste0(id, "_obs.csv")),
+                               select = c("date", "Qobs_mm"))
+      prm <- readRDS(file.path(params_dir, paste0(id, ".rds")))
+      lat <- roster$cwc_lat[roster$id == id]
+
+      for (m in models) {
+         r <- tryCatch({
+            pc <- hyd_read_corrected(m, tier, id, "pr")
+            tx <- hyd_read_corrected(m, tier, id, "tasmax")
+            tn <- hyd_read_corrected(m, tier, id, "tasmin")
+
+            dt <- Reduce(function(x, y) merge(x, y, by = "date", all = TRUE),
+                         list(pc, tx, tn))
+            dt <- merge(obs, dt, by = "date", all.x = TRUE)
+            dt <- dt[order(as.Date(date))]
+            dt[, Tmean_C := (tasmax + tasmin) / 2]
+
+            # Gap handling for 365-day-calendar models (noleap): their series
+            # carry NA on every Feb 29. Never silently dropped: pr -> 0 mm
+            # (conservative), temps -> interpolated between neighbours, and
+            # the number of filled days is logged in the summary table.
+            n_gap <- sum(is.na(dt$Tmean_C))
+            if (n_gap > 0) {
+               dt[, Tmean_C := zoo_gapfill(Tmean_C)]
+               dt[, tasmax := zoo_gapfill(tasmax)]
+               dt[, tasmin := zoo_gapfill(tasmin)]
+               dt[is.na(pr), pr := 0]
+               if (sum(is.na(dt$Tmean_C)) > 0) {   # too-long gap: refuse
+                  stop("unfillable input gaps (n=", n_gap, ")")
+               }
+            }
+            dt[, PET_mm := airGR::PE_Oudin(
+                  JD = as.integer(format(as.Date(date), "%j")),
+                  Temp = Tmean_C, Lat = lat, LatUnit = "deg")]
+
+            inputs <- airGR::CreateInputsModel(
+               FUN_MOD = airGR::RunModel_GR4J,
+               DatesR  = as.POSIXct(as.Date(dt$date)),
+               Precip  = dt$pr,
+               PotEvap = dt$PET_mm)
+
+            run_opt <- airGR::CreateRunOptions(
+               FUN_MOD          = airGR::RunModel_GR4J,
+               InputsModel      = inputs,
+               IndPeriod_WarmUp = i_warm,
+               IndPeriod_Run    = i_run_full)
+
+            out <- airGR::RunModel(inputs, run_opt, Param = prm$param,
+                                   FUN_MOD = airGR::RunModel_GR4J)
+
+            i_eval_dt <- match(full_dates[i_eval], dt$date)
+            o <- dt$Qobs_mm[i_eval_dt]
+            # Qsim is indexed within the run window, which starts right after
+            # the warm-up -> subtract warm-up length
+            s <- out$Qsim[i_eval - hyd_warmup_days]
+
+            flags_eval <- c(dt$flag_pr[i_eval_dt], dt$flag_tasmax[i_eval_dt],
+                            dt$flag_tasmin[i_eval_dt])
+            n_eval <- sum(!is.na(o) & !is.na(s))
+
+            data.frame(
+               id, model = m,
+               kge = round(kge_calc(o, s), 3),
+               nse = round(nse_calc(o, s), 3),
+               pbias = round(pbias_calc(o, s), 2),
+               n_eval_days = n_eval,
+               n_extrap_values = sum(flags_eval != "within_range" &
+                                     !is.na(flags_eval)),
+               n_gap_filled = n_gap)
+         }, error = function(e) {
+            hyd_log(paste("ERROR", id, m, conditionMessage(e)), hyd_log_file)
+            data.frame(id, model = m, kge = NA_real_, nse = NA_real_,
+                       pbias = NA_real_, n_eval_days = NA_integer_,
+                       n_extrap_values = NA_integer_, n_gap_filled = NA_integer_)
+         })
+         sim_rows[[n_row <- n_row + 1L]] <- r
+      }
+      "ok"
+   }, error = function(e) {
+      hyd_log(paste("ERROR catchment", id, conditionMessage(e)), hyd_log_file)
+      "error"
+   })
+}
+
+hyd_sim_summary <- data.table::rbindlist(sim_rows)
+data.table::fwrite(hyd_sim_summary,
+                   file.path(hyd_output_dir, "hyd_sim_summary.csv"))
+cat("simulated rows:", nrow(hyd_sim_summary), "\n")
+```
+
+## 4. Discharge-based model ranking
+
+```{r ranking}
+ok <- hyd_sim_summary[!is.na(kge)]
+
+# per-catchment ranks (lower = better): KGE desc, NSE desc, |PBIAS| asc
+ok[, rank_kge  := data.table::frank(-kge, ties.method = "average"), by = id]
+ok[, rank_nse  := data.table::frank(-nse, ties.method = "average"), by = id]
+ok[, rank_pbias := data.table::frank(abs(pbias), ties.method = "average"), by = id]
+
+rank_table <- ok[, .(
+   n_catchments = data.table::uniqueN(id),
+   mean_kge  = round(mean(kge), 3),
+   median_kge = round(median(kge), 3),
+   mean_nse  = round(mean(nse), 3),
+   mean_pbias = round(mean(pbias), 2),
+   rank_sum_kge = sum(rank_kge),
+   rank_sum_nse = sum(rank_nse),
+   rank_sum_pbias = sum(rank_pbias),
+   extrap_pct = round(100 * sum(n_extrap_values, na.rm = TRUE) /
+                      sum(n_eval_days, na.rm = TRUE), 3)), by = model]
+
+rank_table[, composite_rank_sum := rank_sum_kge + rank_sum_nse + rank_sum_pbias]
+rank_table <- rank_table[order(composite_rank_sum)]
+rank_table[, discharge_rank := seq_len(.N)]
+data.table::fwrite(rank_table,
+                   file.path(hyd_output_dir, "model_ranking_discharge.csv"))
+print(rank_table[, .(discharge_rank, model, median_kge, mean_nse,
+                     mean_pbias, composite_rank_sum, extrap_pct)])
+```
+
+## 5. Agreement with the forcing-based ranking
+
+```{r compare}
+cmp <- merge(rank_table[, .(model, discharge_rank)],
+             ranking[, .(model, qed_rank = seq_len(.N))], by = "model")
+cmp[, rank_shift := qed_rank - discharge_rank]
+data.table::fwrite(cmp, file.path(hyd_output_dir, "ranking_agreement.csv"))
+cat("Spearman agreement between forcing-based and discharge-based ranks:\n")
+print(cor(cmp$discharge_rank, cmp$qed_rank, method = "spearman"))
+```
+
+## Take-away
+
+- `model_ranking_discharge.csv` ranks the corrected CMIP6 series by how well
+  they reproduce **observed discharge** out-of-sample (2001-2014) when driven
+  through calibrated GR4J.
+- `n_extrap_values` counts every corrected value flagged as extrapolation in
+  the evaluation window -- models with large counts are tail-heavy and should
+  be treated with the "linear" pr policy for future windows.
+- Models that stay in the top-14 under BOTH rankings (QED_30 forcing-based and
+  this discharge-based ranking) are the strongest candidates for the SSP
+  download shortlist.

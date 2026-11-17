@@ -1,0 +1,147 @@
+---
+title: "HYD 00 -- Setup: configuration for lumped hydrological modelling"
+subtitle: "CAMELS-India discharge simulation workflow, setup notebook (sourced by 10/20/30)"
+output:
+   html_document:
+      css: style_academic.css
+---
+
+# Notebook 0 -- Hydrology configuration & library
+
+Companion to the QED bias-correction workflow. Everything the hydrology
+notebooks need lives here: paths, tiers source, model choice, PET settings,
+calibration windows. **Edit values here only.**
+
+Model choice (reviewed against Deshmukh et al. 2025 regionalization
+manuscript): **GR4J via airGR** -- equal skill to HBV (median NSE 0.64 vs
+0.63) with 4 instead of 15 parameters, no irrelevant snow module for
+peninsular CAMELS-IND catchments, and inputs limited to pr + PET, which match
+the bias-corrected CMIP6 variables exactly.
+
+```{r paths}
+hyd_project_root <- "D:/Datasets/CIMP6_India"
+
+# QED workflow outputs (bias-corrected series + tiers)
+hyd_qed_dir    <- file.path(hyd_project_root, "data_processed", "qed")
+hyd_qm_corr_dir <- file.path(hyd_qed_dir, "qm_corrected")
+
+# CAMELS-IND observations
+hyd_camels_root <- file.path(hyd_project_root, "data_raw", "camels_ind_forcings")
+hyd_forcing_dir <- file.path(hyd_camels_root, "catchment_mean_forcings")
+hyd_streamflow_fp <- file.path(hyd_camels_root, "streamflow_timeseries",
+                               "streamflow_observed.csv")
+hyd_topo_fp <- file.path(hyd_camels_root, "attributes_csv", "camels_ind_topo.csv")
+
+# Outputs of this workflow
+hyd_output_dir <- file.path(hyd_project_root, "data_processed", "hyd")
+hyd_inputs_dir <- file.path(hyd_output_dir, "model_inputs")   # <id>_obs.csv
+```
+
+```{r period-windows}
+hyd_period_start <- as.Date("1981-01-01")
+hyd_period_end   <- as.Date("2014-12-31")
+
+# Split-sample windows (consistent with the QED_30 ranking design)
+hyd_calib_start <- as.Date("1981-01-01")
+hyd_calib_end   <- as.Date("2000-12-31")
+hyd_valid_start <- as.Date("2001-01-01")
+hyd_valid_end   <- as.Date("2014-12-31")
+
+# airGR warm-up: first 365 days inside each run window
+hyd_warmup_days <- 365L
+
+# Quick-test mode: a handful of catchments to smoke-test the notebooks
+hyd_test_mode <- FALSE
+hyd_test_ids  <- c("03002", "03005", "03008")
+```
+
+```{r model-config}
+# Primary model: GR4J (airGR), 4 parameters, daily
+hyd_model        <- "GR4J"
+
+# PET method: "oudin" (airGR::PE_Oudin; needs daily mean temperature + latitude)
+# Alternative implemented below: "hargreaves" (Hargreaves-Samani 1985, needs
+# tmax AND tmin + latitude). Both use only variables present in CAMELS-IND and
+# in the bias-corrected CMIP6 series.
+hyd_pet_method   <- "oudin"
+
+# Streamflow: observed Q in m3/s -> model space mm/day via basin area (km2)
+#   Q[mm/d] = Q[m3/s] * 86.4 / Area[km2]
+hyd_m3s_to_mm_factor <- 86.4
+```
+
+```{r lib}
+# Only catchments with a usable tier get modelled (tier1 + tier2; tier3 logged)
+hyd_ok_tiers <- c("tier1", "tier2", "correct_with_warning")
+
+# Hargreaves-Samani PET (mm/day), plain R alternative to Oudin.
+# Ra = extraterrestrial radiation (mm/day equivalent), from latitude + DOY.
+hyd_pet_hargreaves <- function(doy, tmax, tmin, lat_deg) {
+   lat <- lat_deg * pi / 180
+   dr  <- 1 + 0.033 * cos(2 * pi * doy / 365)          # earth-sun distance
+   decl <- 0.409 * sin(2 * pi * doy / 365 - 1.39)      # solar declination
+   x   <- pmin(pmax(-tan(lat) * tan(decl), -1), 1)     # guard acos domain
+   ws  <- acos(x)                                      # sunset hour angle
+   ra_mm <- (24 * 60 / pi) * 0.0820 * dr *
+      (ws * sin(lat) * sin(decl) + cos(lat) * cos(decl) * sin(ws))  # MJ/m2/d
+   ra_mm <- ra_mm * 0.408                              # -> mm/day equivalent
+   0.0023 * ra_mm * (pmax((tmax + tmin) / 2 + 17.8, 0)) * pmax(tmax - tmin, 0) ^ 0.5
+}
+
+# CAMELS-IND uses 5-digit ids ("03001"); some tables carry 4-digit ("3001")
+hyd_normalize_id <- function(x) {
+   x <- trimws(as.character(x))
+   ifelse(grepl("^[0-9]+$", x), sprintf("%05d", as.numeric(x)), x)
+}
+
+# Missing-value flags that must be treated as NA wherever they appear
+hyd_missing_flags <- c(-999, -9999, -999.0)
+
+# Timestamped log line
+hyd_log <- function(msg, log_file = NULL) {
+   line <- paste0(format(Sys.time(), "%Y-%m-%d %H:%M:%S"), " | ", msg)
+   cat(line, "\n")
+   if (!is.null(log_file)) cat(line, "\n", file = log_file, append = TRUE)
+}
+
+# Read a CAMELS forcing CSV with a Date column, replace missing flags with NA
+hyd_read_forcing <- function(path) {
+   dt <- data.table::fread(path, na.strings = c("NA", ""))
+   dt[, date := as.Date(sprintf("%04d-%02d-%02d", year, month, day))]
+   for (col in c("prcp(mm/day)", "tmax(C)", "tmin(C)")) {
+      if (col %in% names(dt)) {
+         v <- dt[[col]]
+         v[!is.na(v) & v %in% hyd_missing_flags] <- NA
+         dt[, (col) := v]
+      }
+   }
+   dt[]
+}
+
+# Read observed streamflow (wide table) and return the 5-digit-id column as
+# m3/s with a Date index (missing flags -> NA)
+hyd_read_q_obs <- function(id) {
+   sf_dt <- data.table::fread(hyd_streamflow_fp,
+                              select = c("year", "month", "day", sub("^0+", "", id)))
+   data.table::setnames(sf_dt, sub("^0+", "", id), "q_m3s")
+   v <- sf_dt$q_m3s
+   v[!is.na(v) & v %in% hyd_missing_flags] <- NA
+   sf_dt[, q_m3s := v]
+   sf_dt[, date := as.Date(sprintf("%04d-%02d-%02d", year, month, day))]
+   sf_dt[, .(date, q_m3s)]
+}
+```
+
+```{r self-report}
+dir.create(hyd_inputs_dir, recursive = TRUE, showWarnings = FALSE)
+cat("=============================================================\n")
+cat(" HYD setup loaded (HYD_00_setup.Rmd)\n")
+cat("   model      :", hyd_model, "(airGR) | PET:", hyd_pet_method, "\n")
+cat("   period     :", format(hyd_period_start), "..",
+    format(hyd_period_end), "\n")
+cat("   calib/valid:", format(hyd_calib_start), "..", format(hyd_calib_end),
+    "|", format(hyd_valid_start), "..", format(hyd_valid_end), "\n")
+cat("   test_mode  :", hyd_test_mode, "\n")
+cat("   outputs    :", hyd_output_dir, "\n")
+cat("=============================================================\n")
+```

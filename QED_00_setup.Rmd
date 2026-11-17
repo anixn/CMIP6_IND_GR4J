@@ -1,0 +1,289 @@
+---
+title: "QED 00 -- Setup: configuration & helper library"
+subtitle: "CAMELS-India quantile mapping workflow, setup notebook (sourced by 10/20/30)"
+output:
+   html_document:
+      css: style_academic.css
+---
+
+# Notebook 0 -- Configuration & library
+
+This is the **single place where every threshold, path and setting lives**
+(it plays the role of `config.yaml` in `Suggestion-workflow.md`). It also
+contains the small helper library (ID normalisation, season mapping, and the
+empirical quantile-mapping fit/apply core).
+
+Notebooks 10, 20 and 30 do **not** redefine anything: their first chunk purls
+this file and sources it, so editing a value here changes every notebook.
+
+```{r knitr-hint, include=FALSE}
+# When a QED notebook sources this file it uses knitr::purl + source,
+# so keep all real code inside {r} chunks with no output-side effects
+# other than the final self-report.
+```
+
+## 1. Paths
+
+```{r paths}
+qed_project_root <- "D:/Datasets/CIMP6_India"
+
+qed_camels_root  <- file.path(qed_project_root, "data_raw", "camels_ind_forcings")
+qed_forcing_dir  <- file.path(qed_camels_root, "catchment_mean_forcings")  # QM reference
+qed_streamflow_fp <- file.path(qed_camels_root, "streamflow_timeseries",
+                               "streamflow_observed.csv")                  # tiering input
+qed_lstm_fp       <- file.path(qed_camels_root, "streamflow_timeseries",
+                               "lstm_pred_streamflow.csv")                 # NOT used as obs
+
+# Model-side (source) series: raw CMIP6 NetCDF per variable + the aggregated
+# catchment-mean CSVs (agg_<var>_<model>.csv) produced by QED_05
+qed_cmip6_dir     <- file.path(qed_project_root, "data_raw", "cmip6")
+qed_agg_dir       <- file.path(qed_project_root, "data_processed")
+
+# All outputs of this workflow go here (created automatically)
+qed_output_dir    <- file.path(qed_project_root, "data_processed", "qed")
+```
+
+## 2. Period of interest
+
+```{r period}
+qed_period_start <- as.Date("1981-01-01")
+qed_period_end   <- as.Date("2014-12-31")
+```
+
+## 3. Tiering thresholds (streamflow availability within the period)
+
+```{r tier-thresholds}
+qed_tier1_min_availability <- 0.70   # >= 70% valid days -> Tier 1 (Core)
+qed_tier2_min_availability <- 0.30   # 30-70%           -> Tier 2 (Extended)
+qed_min_days_for_qm        <- 3650   # hard floor of valid days for ANY tier
+qed_forcing_min_availability <- 0.95 # reference-forcing QA flag threshold
+```
+
+## 4. Quantile mapping settings
+
+```{r qm-settings}
+qed_n_quantiles        <- 100        # empirical CDF grid resolution
+qed_min_quantile_sample <- 300       # min valid days per season bin; else fallback
+qed_seasons <- list(
+   DJF = c(12, 1, 2),
+   MAM = c(3, 4, 5),
+   JJA = c(6, 7, 8),
+   SON = c(9, 10, 11)
+)
+# Tail behaviour outside the source CDF range (md recommendation):
+qed_extrap_pr   <- "constant"   # precipitation: clamp to reference tail (no fake storms)
+qed_extrap_temp <- "linear"     # temperature: linear slope extrapolation
+```
+
+## 5. Model-side policy & ranking design
+
+```{r model-policy}
+# Keep only models that have ALL THREE aggregated variables (pr, tasmax, tasmin).
+qed_require_all_vars <- TRUE
+
+# Quick-test mode: 2 models x 3 catchments to smoke-test the pipeline.
+# Set FALSE for production runs.
+qed_test_mode <- FALSE
+
+# Ranking is OUT-OF-SAMPLE: EQM fitted on the calibration years only, applied
+# to the validation years (1981-2000 vs 2001-2014; the raw archive now covers
+# the full 1981-2014 period after the QED_05 re-aggregation).
+qed_rank_calib_start <- as.Date("1981-01-01")
+qed_rank_calib_end   <- as.Date("2000-12-31")
+qed_rank_valid_start <- as.Date("2001-01-01")
+qed_rank_valid_end   <- as.Date("2014-12-31")
+# Optional cap on catchments used for ranking (NULL = all Tier 1 catchments).
+qed_rank_max_catchments <- NULL
+```
+
+## 6. Variables, IDs, missing flags
+
+```{r vars-ids}
+qed_vars <- c("pr", "tasmax", "tasmin")
+qed_camels_var_cols <- c("prcp(mm/day)", "tmax(C)", "tmin(C)")
+names(qed_camels_var_cols) <- qed_vars
+
+# CAMELS-IND uses 5-digit ids ("03001"); streamflow header uses 4-digit ("3001")
+qed_normalize_id <- function(x) {
+   x <- trimws(as.character(x))
+   ifelse(grepl("^[0-9]+$", x), sprintf("%05d", as.numeric(x)), x)
+}
+
+# Missing-value flags that must be treated as NA wherever they appear
+qed_missing_flags <- c(-999, -9999, -999.0)
+```
+
+## 7. Helper library
+
+### 7.1 Season helpers
+
+```{r lib-seasons}
+# Map month numbers (1..12) to season labels, using qed_seasons above
+qed_month_to_season <- function(month, seasons = qed_seasons) {
+   lab <- rep(NA_character_, length(month))
+   for (s in names(seasons)) lab[month %in% seasons[[s]]] <- s
+   lab
+}
+
+qed_date_to_season <- function(dates, seasons = qed_seasons) {
+   qed_month_to_season(as.integer(format(dates, "%m")), seasons)
+}
+
+# Full daily index for the period (never trust a file's own index)
+qed_full_dates <- function(start = qed_period_start, end = qed_period_end) {
+   seq(start, end, by = "day")
+}
+
+# Longest run of consecutive TRUE in a logical vector (0 if none)
+qed_longest_run <- function(ok) {
+   ok <- as.logical(ok)
+   if (all(is.na(ok))) return(NA_integer_)
+   ok[is.na(ok)] <- FALSE
+   r <- rle(ok)
+   if (!any(r$values)) 0L else max(r$lengths[r$values])
+}
+
+# Timestamped log line to console + log file
+qed_log <- function(msg, log_file = NULL) {
+   line <- paste0(format(Sys.time(), "%Y-%m-%d %H:%M:%S"), " | ", msg)
+   cat(line, "\n")
+   if (!is.null(log_file)) cat(line, "\n", file = log_file, append = TRUE)
+}
+```
+
+### 7.2 CSV readers
+
+```{r lib-readers}
+# Read a CAMELS forcing CSV (year,month,day,prcp(mm/day),tmax(C),tmin(C)),
+# replace missing flags with NA, return a data.table with a Date column.
+qed_read_forcing <- function(path, var_cols = qed_camels_var_cols) {
+   dt <- data.table::fread(path, na.strings = c("NA", ""))
+   dt[, date := as.Date(sprintf("%04d-%02d-%02d", year, month, day))]
+   for (col in var_cols) {
+      if (col %in% names(dt)) {
+         v <- dt[[col]]
+         v[!is.na(v) & v %in% qed_missing_flags] <- NA
+         dt[, (col) := v]
+      }
+   }
+   dt[]
+}
+
+# Read one aggregated CMIP6 CSV. Layout: first column "id" (5-digit ids),
+# remaining columns are dates with YYYYMMDD headers; one row per catchment.
+# Returns list(ids, dates, values = matrix [n_catchments, n_dates]).
+qed_read_agg <- function(path) {
+   dt <- data.table::fread(path)
+   ids <- qed_normalize_id(dt[["id"]])
+   if (!all(grepl("^[0-9]{8}$", names(dt)[-1]))) {
+      stop("Unexpected agg layout (date headers expected): ", basename(path))
+   }
+   dates <- as.Date(names(dt)[-1], format = "%Y%m%d")
+   values <- as.matrix(dt[, -1])
+   mode(values) <- "numeric"
+   values[!is.na(values) & values %in% qed_missing_flags] <- NA
+   list(ids = ids, dates = dates, values = values)
+}
+
+# Extract one catchment's series from an agg object (NA vector if id absent)
+qed_get_series <- function(agg, id) {
+   i <- match(id, agg$ids)
+   if (is.na(i)) return(rep(NA_real_, length(agg$dates)))
+   agg$values[i, ]
+}
+```
+
+### 7.3 Empirical quantile mapping: fit
+
+```{r lib-fit}
+# Marginal EQM: corrected(x) = F_ref^-1( F_src(x) ).
+# Each CDF is estimated on its own non-NA values over the caller's window.
+# Duplicated source quantiles (e.g. dry days all at 0) are collapsed so that
+# stats::approx() always sees a strictly increasing x; the p-grid moves in step.
+# Returns NULL when there is too little data (caller logs the fallback).
+qed_fit_eqm <- function(src, ref, n_q = qed_n_quantiles) {
+   src <- src[!is.na(src)]
+   ref <- ref[!is.na(ref)]
+   if (length(src) < 30 || length(ref) < 30) return(NULL)
+
+   p  <- seq(0, 1, length.out = n_q)
+   q_src <- stats::quantile(src, probs = p, names = FALSE, type = 7, na.rm = TRUE)
+   q_ref <- stats::quantile(ref, probs = p, names = FALSE, type = 7, na.rm = TRUE)
+
+   keep <- !duplicated(q_src)
+   if (sum(keep) < 3) return(NULL)  # degenerate distribution
+   list(p = p[keep], q_src = q_src[keep], q_ref = q_ref[keep],
+        n_src = length(src), n_ref = length(ref))
+}
+```
+
+### 7.4 Empirical quantile mapping: apply
+
+```{r lib-apply}
+# Apply a fit to a vector. NA in -> NA out (never fill a source NaN).
+# Extrapolation: "constant" clamps to the nearest reference tail;
+# "linear" extends with the outermost CDF segment slope.
+# The flag columns are ALWAYS written -- never extrapolate silently.
+qed_apply_eqm <- function(x, fit, extrap = "constant") {
+   out <- data.table::data.table(
+      x_src      = x,
+      x_corrected = NA_real_,
+      within_range = NA,
+      extrapolated_low  = FALSE,
+      extrapolated_high = FALSE
+   )
+   if (is.null(fit)) return(out)
+
+   na_i <- is.na(x)
+   lo   <- fit$q_src[1]
+   hi   <- fit$q_src[length(fit$q_src)]
+
+   # F_src(x) on (q_src -> p), then invert on (p -> q_ref); rule=2 clamps
+   p_x <- stats::approx(fit$q_src, fit$p, xout = x, method = "linear",
+                        yleft = 0, yright = 1, rule = 2, ties = "ordered")$y
+   y   <- stats::approx(fit$p, fit$q_ref, xout = p_x, method = "linear",
+                        rule = 2, ties = "ordered")$y
+
+   low_i  <- !na_i & x < lo
+   high_i <- !na_i & x > hi
+
+   if (extrap == "linear" && any(low_i | high_i)) {
+      dsx <- fit$q_src[2] - fit$q_src[1]           # grid spacing (regular)
+      dry <- fit$q_ref[2] - fit$q_ref[1]
+      slope <- if (is.finite(dsx) && dsx > 0) dry / dsx else 1
+      y[low_i]  <- fit$q_ref[1]  + (x[low_i]  - lo) * slope
+      y[high_i] <- fit$q_ref[length(fit$q_ref)] + (x[high_i] - hi) * slope
+   } else {
+      y[low_i]  <- fit$q_ref[1]
+      y[high_i] <- fit$q_ref[length(fit$q_ref)]
+   }
+
+   out$x_corrected <- y
+   out$within_range <- !na_i & !low_i & !high_i
+   out$extrapolated_low  <- low_i
+   out$extrapolated_high <- high_i
+   # Precipitation can never be negative after mapping
+   if (identical(extrap, "constant")) out$x_corrected <- pmax(out$x_corrected, 0)
+   out[]
+}
+```
+
+## 8. Self-report
+
+```{r self-report}
+dir.create(qed_output_dir, recursive = TRUE, showWarnings = FALSE)
+cat("=============================================================\n")
+cat(" QED setup loaded (QED_00_setup.Rmd)\n")
+cat("   period      :", format(qed_period_start), "..",
+    format(qed_period_end), "\n")
+cat("   forcing ref :", qed_forcing_dir, "\n")
+cat("   streamflow  :", basename(qed_streamflow_fp), "(obs only)\n")
+cat("   source aggs :", qed_agg_dir, "\n")
+cat("   outputs     :", qed_output_dir, "\n")
+cat("   tiers       : T1 >=", qed_tier1_min_availability,
+    "| T2 >=", qed_tier2_min_availability,
+    "| floor", qed_min_days_for_qm, "days\n")
+cat("   QM          :", qed_n_quantiles, "quantiles; season bins >=",
+    qed_min_quantile_sample, "days; test_mode =", qed_test_mode, "\n")
+cat("=============================================================\n")
+```

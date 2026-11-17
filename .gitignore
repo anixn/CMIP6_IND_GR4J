@@ -1,0 +1,53 @@
+# ============================================================
+# .gitignore -- CIMP6_India / CAMELS-IND GR4J workflow
+# Rule: code, notebooks, small result tables and manuscripts are tracked;
+#       bulk data (raw downloads, corrected series, per-catchment inputs)
+#       is regenerable from the notebooks and stays out of git.
+# ============================================================
+
+# ---- raw data (GBs; re-downloadable) ----
+data_raw/
+data_raw_backup/
+*.nc
+
+# ---- QED_05 working aggregates at data_processed root (5.2 GB; ----
+# ---- regenerate with QED_05_aggregate_cmip6.Rmd from raw nc)   ----
+data_processed/*.csv
+
+# ---- QM fit parameters (15,972 small files; regenerate with ----
+# ---- QED_20_qm_fit_apply.Rmd; needed locally for the SSP leg) ----
+data_processed/qed/qm_params/
+
+# ---- processed bulk series (GBs; regenerate with QED_30 / HYD_10) ----
+data_processed/qed/qm_corrected/
+data_processed/hyd/model_inputs/
+
+# ---- rendered notebooks (regenerate by knitting) ----
+*.html
+
+# ---- LaTeX build artefacts ----
+*.aux
+*.bbl
+*.blg
+*.fdb_latexmk
+*.fls
+*.out
+*.synctex.gz
+*.toc
+*.lof
+*.lot
+
+# ---- R session artefacts ----
+.Rhistory
+.RData
+.Rproj.user/
+*.Rproj
+
+# ---- OS noise ----
+Thumbs.db
+Desktop.ini
+.DS_Store
+
+# ---- editor noise ----
+.vscode/
+.idea/

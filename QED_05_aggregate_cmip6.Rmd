@@ -1,0 +1,181 @@
+---
+title: "QED 05 -- Aggregate CMIP6 to catchment means (1981-2014, 22 models)"
+subtitle: "CAMELS-India quantile mapping workflow, data-preparation notebook"
+output:
+   html_document:
+      css: style_academic.css
+---
+
+```{r source-setup, include=FALSE}
+knitr::purl("QED_00_setup.Rmd", file.path(tempdir(), "qed00_setup.R"), documentation = 2)
+source(file.path(tempdir(), "qed00_setup.R"))
+```
+
+# Notebook 05 -- Aggregate raw CMIP6 to catchment means
+
+**What this notebook does.** Turns the raw CMIP6 NetCDF daily files under
+`data_raw/cmip6/<var>/` into the wide catchment-mean CSVs
+(`data_processed/agg_<var>_<model>.csv`) that notebooks 20 and 30 read:
+
+* layout: first column `id` (5-digit `gauge_id`), remaining columns one per
+  calendar day of `r format(qed_period_start)` .. `r format(qed_period_end)`
+  (12,418 days), one row per catchment (472);
+* catchment mean = **cell-area-weighted mean** (cos(latitude) weighting on the
+  regular lat/lon grid) of every grid cell intersecting the polygon;
+* unit conversion: pr `kg m-2 s-1` -> **mm/day** (x 86400), tas K -> **degC**
+  (- 273.15);
+* calendar handling: 365-day (noleap) files are mapped by `terra::time()`
+  (Feb 28 -> Mar 1, no Feb 29); the one **360-day calendar model**
+  (HadGEM3-GC31-MM) is mapped to day 1..30 of each real month -- its
+  day-31 values and invalid Feb 29/30 land on `NA` and are logged;
+* models are only kept if **all three variables** exist in the raw archive;
+  excluded models are logged with the reason.
+
+Run this notebook **once per change of the raw archive** (it takes ~1 h). It
+does not need re-running for the QM notebooks as long as the agg CSVs are
+newer than the nc files you care about.
+
+```{r log-file}
+qed_log_file <- file.path(qed_output_dir, "qed_05_log.txt")
+```
+
+## 1. Discover models in the raw archive
+
+```{r discover}
+vars <- qed_vars
+model_files <- setNames(vector("list", 3), vars)
+for (v in vars) {
+   fl <- list.files(file.path(qed_cmip6_dir, v), pattern = "_historical_",
+                    full.names = TRUE)
+   m <- vapply(strsplit(basename(fl), "_"), `[`, character(1), 3)
+   model_files[[v]] <- split(fl, m)
+   cat(v, ":", length(unique(m)), "models,", length(fl), "files\n")
+}
+
+models_all3 <- Reduce(intersect, lapply(model_files, names))
+excluded <- setdiff(Reduce(union, lapply(model_files, names)), models_all3)
+cat("\nModels with all 3 variables:", length(models_all3), "\n")
+cat(paste(models_all3, collapse = ", "), "\n")
+if (length(excluded)) cat("Excluded (missing variables):",
+                          paste(excluded, collapse = ", "), "\n")
+qed_log(paste("QED_05 models:", length(models_all3), "| excluded:",
+              paste(excluded, collapse = ",")), qed_log_file)
+```
+
+## 2. Catchment polygons (read once)
+
+```{r polygons}
+polys <- sf::st_as_sf(terra::vect(file.path(qed_project_root, "data_raw",
+                                            "catchments", "merged",
+                                            "all_catchments.shp")))
+polys$id <- qed_normalize_id(polys$gauge_id)
+n_polys <- nrow(polys)
+cat("Polygons:", n_polys, "\n")
+
+# Full daily column grid for the period
+full_dates  <- qed_full_dates()
+full_cols   <- format(full_dates, "%Y%m%d")
+n_days      <- length(full_cols)
+stopifnot(n_days == 12418L)
+```
+
+## 3. Date mapping helper (handles the 360-day calendar)
+
+```{r date-helper}
+# Dates for one nc file: terra's time axis for 365-day calendars; explicit
+# 30-day-month mapping for 360-day calendars (invalid real dates -> NA).
+qed_nc_dates <- function(r, year) {
+   nl <- terra::nlyr(r)
+   if (nl == 360) {
+      m <- (seq_len(nl) - 1L) %/% 30L + 1L
+      d <- (seq_len(nl) - 1L) %% 30L + 1L
+      dt <- as.Date(sprintf("%04d-%02d-%02d", year, m, d))  # Feb 30 -> NA
+   } else {
+      dt <- as.Date(terra::time(r))
+   }
+   dt
+}
+```
+
+## 4. Aggregate: one pass per model x variable
+
+```{r aggregate, eval=TRUE}
+unit_scale   <- c(pr = 86400, tasmax = -273.15, tasmin = -273.15)
+unit_is_add  <- c(pr = FALSE, tasmax = TRUE,  tasmin = TRUE)  # add vs multiply
+
+for (model in models_all3) {
+   for (v in vars) {
+      files <- sort(model_files[[v]][[model]])
+      years <- as.integer(sub("^.*_([0-9]{4})_v.*$", "\\1", basename(files)))
+      files <- files[years >= lubridate::year(qed_period_start) &
+                     years <= lubridate::year(qed_period_end)]
+
+      out <- matrix(NA_real_, nrow = n_polys, ncol = n_days,
+                    dimnames = list(polys$id, full_cols))
+      n_files_bad <- 0L
+
+      for (f in files) {
+         yr <- as.integer(sub("^.*_([0-9]{4})_v.*$", "\\1", basename(f)))
+         res <- tryCatch({
+            r <- terra::rast(f)
+            dt <- qed_nc_dates(r, yr)
+            w  <- cos(terra::init(r, "y") * pi / 180)     # cell-area weights
+            ex <- exactextractr::exact_extract(
+               r, polys, "weighted_mean", weights = w,
+               stack_apply = TRUE, progress = FALSE)
+            vals <- as.matrix(ex)                          # [n_polys, nl]
+            vals <- if (unit_is_add[[v]]) vals + unit_scale[[v]]
+                    else vals * unit_scale[[v]]
+            idx <- match(format(dt, "%Y%m%d"), full_cols)  # NA for invalid
+            keep <- !is.na(idx)
+            out[, idx[keep]] <- vals[, keep, drop = FALSE]
+            TRUE
+         }, error = function(e) {
+            qed_log(paste("ERROR", model, v, basename(f),
+                          conditionMessage(e)), qed_log_file)
+            FALSE
+         })
+         if (!isTRUE(res)) n_files_bad <- n_files_bad + 1L
+      }
+
+      fp <- file.path(qed_agg_dir, sprintf("agg_%s_%s.csv", v, model))
+      dt_out <- data.table::as.data.table(out)
+      dt_out[, id := rownames(out)]
+      data.table::setcolorder(dt_out, "id")
+      data.table::fwrite(dt_out, fp)
+
+      n_cov <- sum(!is.na(out[1, ]))
+      qed_log(sprintf("agg %s %s: %d/%d files ok, %d/%d days covered",
+                      v, model, length(files) - n_files_bad, length(files),
+                      n_cov, n_days), qed_log_file)
+   }
+   cat("done:", model, "\n")
+}
+```
+
+## 5. Verification: all three variables present per model
+
+```{r verify}
+agg_files <- list.files(qed_agg_dir, pattern = "^agg_(pr|tasmax|tasmin)_",
+                        full.names = TRUE)
+agg_base <- tools::file_path_sans_ext(basename(agg_files))
+var_of <- vapply(strsplit(agg_base, "_"), `[`, character(1), 2)
+mod_of <- vapply(strsplit(agg_base, "_"), `[`, character(1), 3)
+present <- table(var = var_of, model = mod_of)
+final_models <- intersect(models_all3, names(which(colSums(present) == 3)))
+cat("Models with all 3 agg files:", length(final_models), "\n")
+cat(paste(sort(final_models), collapse = ", "), "\n")
+stopifnot(length(final_models) > 0)   # never wipe outputs on a parse mistake
+
+# Remove agg CSVs of models that are NOT in the current model set
+stale <- agg_files[!mod_of %in% final_models]
+if (length(stale)) {
+   file.remove(stale)
+   cat("Removed stale agg files:", paste(basename(stale), collapse = ", "), "\n")
+}
+qed_log("QED_05 done", qed_log_file)
+```
+
+The R session now has `final_models` -- the authoritative model list. Notebooks
+20/30 re-discover models from the agg files themselves, so nothing else needs
+to change.

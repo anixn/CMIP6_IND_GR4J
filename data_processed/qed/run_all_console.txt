@@ -1,0 +1,17 @@
+﻿Rscript : [WARNING] Deprecated: --mathjax. Use --math-method=mathjax[:URL] instead.
+At line:1 char:1
++ Rscript -e "rmarkdown::render('QED_run_all.Rmd', output_format='html_ ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: ([WARNING] Depre...[:URL] instead.:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+[WARNING] Deprecated: --mathjax. Use --math-method=mathjax[:URL] instead.
+Error in `Math.data.frame()`:
+! non-numeric-alike variable(s) in data frame: var
+Backtrace:
+    Γûå
+ 1. Γö£ΓöÇknitr::kable(...)
+ 2. ΓööΓöÇbase::Math.data.frame(`<dt[,3]>`, 3)
+
+Quitting from QED_run_all.Rmd:14-33 [run]
+Execution halted

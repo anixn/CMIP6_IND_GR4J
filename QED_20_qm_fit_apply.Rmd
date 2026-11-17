@@ -1,0 +1,291 @@
+---
+title: "QED 20 -- Fit & apply empirical quantile mapping (per model x catchment x variable)"
+subtitle: "CAMELS-India quantile mapping workflow, notebook 2 of 3"
+author: "Generated per Suggestion-workflow.md, Steps 5-7"
+output:
+   html_document:
+      css: style_academic.css
+---
+
+```{r source-setup, include=FALSE}
+knitr::purl("QED_00_setup.Rmd", file.path(tempdir(), "qed00_setup.R"), documentation = 2)
+source(file.path(tempdir(), "qed00_setup.R"))
+```
+
+# Notebook 2 -- Fit & apply QM
+
+**What this notebook does** (Steps 5-7 of `Suggestion-workflow.md`):
+
+1. **Setup (Step 5):** For every model with all three aggregated variables
+   (pr, tasmax, tasmin) and every Tier 1/2 catchment, fit an **empirical
+   quantile mapping** from the CMIP6 catchment-mean series (source) to the
+   CAMELS-India catchment-mean forcings (reference). Fits are **seasonal**
+   (DJF/MAM/JJA/SON) with fallback to annual when a season bin has fewer than
+   `r qed_min_quantile_sample` valid days; every fallback is logged.
+2. **Apply & save (Step 6):** Apply each fitted mapping to the **full source
+   series** (not only the overlap window), flag every extrapolated value, and
+   write corrected CSVs + QM parameter files.
+3. **Tier 3 handling (Step 7):** Option C -- exclude Tier 3 catchments from QM
+   and document each one in `tier3_handling_log.csv`.
+
+Directory layout produced here (inside `data_processed/qed/`):
+
+```
+qm_corrected/<model>/<tier>/<catchment_id>_<var>.csv   # date, source_value, corrected_value, method_flag
+qm_params/<model>/<tier>/<catchment_id>_<var>.rds      # fitted quantile pairs
+qm_run_summary.csv                                     # one row per model x catchment x var
+tier3_handling_log.csv
+```
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = TRUE, message = TRUE)
+```
+
+```{r log-file}
+qed_log_file <- file.path(qed_output_dir, "qed_20_log.txt")
+```
+
+## 0. Inputs from notebook 10
+
+```{r load-inventory}
+inventory <- data.table::fread(file.path(qed_output_dir, "inventory.csv"),
+                               colClasses = list(character = "id"))
+# Catchments that receive QM: tiers 1 and 2 (forcing warning does not exclude)
+qm_catch <- inventory[final_action %in% c("tier1", "tier2", "correct_with_warning")]
+qm_catch[, tier := data.table::fifelse(final_action == "tier1", "tier1",
+                    data.table::fifelse(final_action == "tier2", "tier2", "tier2"))]
+cat("Catchments to correct:", nrow(qm_catch),
+    "(tier1 =", sum(qm_catch$tier == "tier1"),
+    "| tier2 =", sum(qm_catch$tier == "tier2"), ")\n")
+```
+
+## 1. Models: keep only those with all three variables
+
+```{r model-discovery}
+pr_files   <- list.files(qed_agg_dir, pattern = "^agg_pr_", full.names = TRUE)
+models_pr  <- tools::file_path_sans_ext(sub("^agg_pr_", "", basename(pr_files)))
+tx_files   <- list.files(qed_agg_dir, pattern = "^agg_tasmax_", full.names = TRUE)
+models_tx  <- tools::file_path_sans_ext(sub("^agg_tasmax_", "", basename(tx_files)))
+tn_files   <- list.files(qed_agg_dir, pattern = "^agg_tasmin_", full.names = TRUE)
+models_tn  <- tools::file_path_sans_ext(sub("^agg_tasmin_", "", basename(tn_files)))
+
+qed_models <- if (qed_require_all_vars) {
+   Reduce(intersect, list(models_pr, models_tx, models_tn))
+} else union(models_pr, union(models_tx, models_tn))
+cat("Models with all 3 variables:", length(qed_models), "\n")
+cat(paste(qed_models, collapse = ", "), "\n")
+
+if (qed_test_mode) {
+   qed_models <- qed_models[1:2]
+   qm_catch   <- head(qm_catch, 3)
+   cat("TEST MODE: reduced to", length(qed_models), "models,",
+       nrow(qm_catch), "catchments\n")
+}
+```
+
+## 2. Cache the reference forcings for Tier 1/2 catchments (read once)
+
+```{r cache-forcing}
+forcing_cache <- setNames(
+   vector("list", nrow(qm_catch)), qm_catch$id)
+for (i in seq_len(nrow(qm_catch))) {
+   id <- qm_catch$id[i]
+   f  <- qed_read_forcing(file.path(qed_forcing_dir, paste0(id, ".csv")))
+   f  <- f[date >= qed_period_start & date <= qed_period_end]
+   forcing_cache[[id]] <- f
+}
+```
+
+## 3. Fit + apply, model by model
+
+The loop below is deliberately **one model at a time** so only one model's agg
+files live in memory. For each (model, catchment, variable):
+
+* overlap window = source dates within `r format(qed_period_start)` ..
+  `r format(qed_period_end)`;
+* require overlap >= `r qed_min_days_for_qm` valid source days, else **skip and
+  log** (no silent drop);
+* fit per season where the season bin has >= `r qed_min_quantile_sample` valid
+  days, else **fall back to the annual fit** and log it;
+* apply to the **full** source series; extrapolation policy:
+  pr -> `r qed_extrap_pr`, temperature -> `r qed_extrap_temp`.
+
+```{r main-loop}
+dir.create(file.path(qed_output_dir, "qm_corrected"), showWarnings = FALSE)
+dir.create(file.path(qed_output_dir, "qm_params"),    showWarnings = FALSE)
+
+summary_rows <- list()
+n_row <- 0L
+
+for (model in qed_models) {
+
+   agg_pr  <- qed_read_agg(file.path(qed_agg_dir, paste0("agg_pr_",    model, ".csv")))
+   agg_tx  <- qed_read_agg(file.path(qed_agg_dir, paste0("agg_tasmax_", model, ".csv")))
+   agg_tn  <- qed_read_agg(file.path(qed_agg_dir, paste0("agg_tasmin_", model, ".csv")))
+
+   for (i in seq_len(nrow(qm_catch))) {
+      id   <- qm_catch$id[i]
+      tier <- qm_catch$tier[i]
+
+      out_dir <- file.path(qed_output_dir, "qm_corrected", model, tier)
+      par_dir <- file.path(qed_output_dir, "qm_params",    model, tier)
+      dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
+      dir.create(par_dir, recursive = TRUE, showWarnings = FALSE)
+
+      ref <- forcing_cache[[id]]
+
+      res <- tryCatch({
+
+         for (var in qed_vars) {
+            agg   <- switch(var, pr = agg_pr, tasmax = agg_tx, tasmin = agg_tn)
+            rcol  <- qed_camels_var_cols[[var]]
+
+            src_all  <- qed_get_series(agg, id)          # full source series
+            src_date <- agg$dates
+            in_win   <- src_date >= qed_period_start & src_date <= qed_period_end
+
+            # --- Step 5.4: overlap-window sanity check -------------------
+            n_overlap_valid <- sum(!is.na(src_all[in_win]))
+            if (n_overlap_valid < qed_min_days_for_qm) {
+               summary_rows[[n_row <- n_row + 1L]] <-
+                  data.frame(model, id, var, tier,
+                             status = paste0("skipped_overlap_lt_", qed_min_days_for_qm),
+                             n_overlap = n_overlap_valid,
+                             bins_used = NA_character_,
+                             n_extrap = NA_integer_, frac_extrap = NA_real_)
+               next
+            }
+
+            extrap <- switch(var, pr = qed_extrap_pr,
+                             tasmax = qed_extrap_temp, tasmin = qed_extrap_temp)
+
+            # --- Step 5.3: reference restricted to the overlap window -----
+            ref_w <- ref[[rcol]][ref$date %in% src_date[in_win]]
+
+            # --- fit on the overlap window, apply to the FULL series ------
+            fits <- list(); bins_used <- character(0)
+            s_lbl <- qed_date_to_season(src_date[in_win])
+            src_w <- src_all[in_win]
+            for (s in names(qed_seasons)) {
+               # Step 5.8: seasonal fit only if the bin has enough days
+               if (sum(s_lbl == s) >= qed_min_quantile_sample) {
+                  fits[[s]] <- qed_fit_eqm(src_w[s_lbl == s], ref_w, qed_n_quantiles)
+                  if (!is.null(fits[[s]])) bins_used <- c(bins_used, s)
+               }
+            }
+            fallback_annual <- length(bins_used) < length(qed_seasons)
+            if (fallback_annual) {
+               fits[["annual"]] <- qed_fit_eqm(src_w, ref_w, qed_n_quantiles)
+               if (!is.null(fits[["annual"]])) {
+                  bins_used <- c(bins_used, "annual(fallback)")
+               }
+            }
+
+            if (is.null(fits[["annual"]]) && all(vapply(fits[names(qed_seasons)],
+                                                        is.null, logical(1)))) {
+               summary_rows[[n_row <- n_row + 1L]] <-
+                  data.frame(model, id, var, tier, status = "skipped_no_fit_possible",
+                             n_overlap = n_overlap_valid,
+                             bins_used = NA_character_,
+                             n_extrap = NA_integer_, frac_extrap = NA_real_)
+               next
+            }
+
+            # --- Step 6: apply to the FULL source series -------------------
+            # Pre-allocate one row per source date, then fill column-wise by
+            # season (avoids any row duplication).
+            appl <- data.table::data.table(
+               x_src      = src_all,
+               x_corrected = NA_real_,
+               within_range = NA,
+               extrapolated_low  = FALSE,
+               extrapolated_high = FALSE)
+            s_full <- qed_date_to_season(src_date)
+            for (s in names(qed_seasons)) {
+               w <- which(s_full == s)
+               if (!length(w)) next
+               f <- fits[[s]]
+               if (is.null(f)) f <- fits[["annual"]]   # season bin fell back
+               if (is.null(f)) stop(sprintf(
+                  "%s/%s/%s: no fit for season %s and no annual fallback",
+                  model, id, var, s))
+               res <- qed_apply_eqm(src_all[w], f, extrap)
+               appl$x_corrected[w]       <- res$x_corrected
+               appl$within_range[w]      <- res$within_range
+               appl$extrapolated_low[w]  <- res$extrapolated_low
+               appl$extrapolated_high[w] <- res$extrapolated_high
+            }
+
+            method_flag <- ifelse(is.na(appl$x_src), "source_nan",
+                           ifelse(appl$extrapolated_low, "extrapolated_low",
+                            ifelse(appl$extrapolated_high, "extrapolated_high",
+                                   "within_range")))
+
+            # Acceptance check: corrected NaN only where source NaN
+            bad <- sum(is.na(appl$x_corrected) & !is.na(appl$x_src))
+            if (bad > 0) stop(sprintf(
+               "%s/%s/%s: %d corrected NaN with valid source", model, id, var, bad))
+
+            out <- data.table::data.table(
+               date           = src_date,
+               source_value   = appl$x_src,
+               corrected_value= appl$x_corrected,
+               method_flag    = method_flag)
+            data.table::fwrite(out,
+               file.path(out_dir, paste0(id, "_", var, ".csv")))
+
+            saveRDS(fits, file.path(par_dir, paste0(id, "_", var, ".rds")))
+
+            n_extrap <- sum(appl$extrapolated_low | appl$extrapolated_high)
+            summary_rows[[n_row <- n_row + 1L]] <-
+               data.frame(model, id, var, tier,
+                          status = ifelse(fallback_annual,
+                                          "fitted_annual_fallback", "fitted"),
+                          n_overlap = n_overlap_valid,
+                          bins_used = paste(bins_used, collapse = "+"),
+                          n_extrap = n_extrap,
+                          frac_extrap = round(n_extrap / length(src_date), 4))
+         }
+         "ok"
+      },
+      error = function(e) {
+         qed_log(paste("ERROR", model, id, conditionMessage(e)), qed_log_file)
+         paste("error:", conditionMessage(e))
+      })
+   }
+
+   rm(agg_pr, agg_tx, agg_tn); invisible(gc())
+   qed_log(paste("model done:", model), qed_log_file)
+}
+
+qm_run_summary <- data.table::rbindlist(summary_rows, fill = TRUE)
+data.table::fwrite(qm_run_summary, file.path(qed_output_dir, "qm_run_summary.csv"))
+print(table(qm_run_summary$status))
+```
+
+## 4. Step 7 -- Tier 3 handling (Option C: exclude & log)
+
+```{r tier3-log}
+tier3 <- inventory[grepl("^tier3", final_action)]
+tier3_log <- data.frame(
+   catchment_id = tier3$id,
+   option = "C",
+   reason = tier3$final_action,
+   availability = tier3$availability_frac,
+   n_valid_days = tier3$n_valid_days,
+   note = "excluded from QM per Suggestion-workflow.md Step 7 / Option C")
+data.table::fwrite(tier3_log, file.path(qed_output_dir, "tier3_handling_log.csv"))
+cat("Tier 3 logged:", nrow(tier3_log), "catchments\n")
+# LSTM streamflow is NOT used as observed anywhere in this workflow (hard rule 6)
+```
+
+## Acceptance checks
+
+```{r checks}
+# (a) every Tier1/2 catchment x var has a fitted file or a logged skip
+stopifnot(nrow(qm_run_summary) == length(qed_models) * nrow(qm_catch) * length(qed_vars))
+# (b) no skip went unlogged (skips are rows in qm_run_summary with status skipped_*)
+cat("status counts:\n"); print(table(qm_run_summary$status))
+qed_log(paste0("Notebook 20 done. rows=", nrow(qm_run_summary),
+               " fitted=", sum(grepl("^fitted", qm_run_summary$status))), qed_log_file)
+```

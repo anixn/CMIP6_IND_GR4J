@@ -1,0 +1,35 @@
+---
+title: "QED -- run everything"
+subtitle: "Renders the three QED notebooks in order and writes a run log"
+output:
+   html_document:
+      css: style_academic.css
+---
+
+# Run all
+
+This is the only file you need to execute. It renders the notebooks in order;
+each one checks and reuses the previous notebook's outputs, so run them
+sequentially. **Before a production run, open `QED_00_setup.Rmd` and set
+`qed_test_mode <- FALSE`.**
+
+```{r run, eval=TRUE}
+run_log <- file.path("data_processed", "qed", "QED_run_all_log.txt")
+dir.create(dirname(run_log), recursive = TRUE, showWarnings = FALSE)
+
+for (nb in c("QED_10_inventory_tiers.Rmd",
+             "QED_20_qm_fit_apply.Rmd",
+             "QED_30_rank_and_report.Rmd")) {
+   t0 <- Sys.time()
+   cat("\n==================================================\nRendering:", nb,
+       "at", format(t0), "\n")
+   cat(format(t0), "START", nb, "\n", file = run_log, append = TRUE)
+   rmarkdown::render(nb, output_format = "html_document", quiet = TRUE)
+   dt <- round(as.numeric(difftime(Sys.time(), t0, units = "mins")), 2)
+   cat(format(Sys.time()), "DONE ", nb, "in", dt, "min\n", file = run_log, append = TRUE)
+   cat("Done in", dt, "min\n")
+}
+
+cat("\nAll notebooks rendered. Deliverables are in data_processed/qed/\n")
+cat("See PIPELINE_REPORT.md for the summary and the model shortlist.\n")
+```

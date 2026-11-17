@@ -1,0 +1,17 @@
+model,qed_forcing_rank,gr4j_discharge_rank,hybrid_rank_mean,selected,note
+EC-Earth3-Veg-LR,1,3,2.0,1,both top-3
+MIROC-ES2L,3,7,5.0,1,both top-14
+NorESM2-MM,7,1,4.0,1,best discharge volume bias (-4.3%)
+MIROC6,9,2,5.5,1,both top-14
+FGOALS-g3,2,13,7.5,1,both top-14
+HadGEM3-GC31-MM,11,6,8.5,1,both top-14; high ECS ~5.6
+EC-Earth3,14,4,9.0,1,both top-14
+INM-CM4-8,4,15,9.5,1,kept: lowest ECS ~1.8; discharge just outside top-14
+BCC-CSM2-MR,8,12,10.0,1,both top-14
+ACCESS-ESM1-5,13,8,10.5,1,both top-14
+CanESM5,12,14,13.0,1,both top-14; high ECS ~5.7
+CNRM-CM6-1,10,17,13.5,1,kept: forcing top-10; discharge near-miss
+MPI-ESM1-2-HR,22,5,13.5,1,added: strong discharge (PBIAS +5.3%)
+GFDL-ESM4,19,9,14.0,1,added: strong discharge (PBIAS +4.7%)
+GISS-E2-1-G,5,21,13.0,0,dropped: discharge 21/22
+INM-CM5-0,6,20,13.0,0,dropped: discharge 20/22

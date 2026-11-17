@@ -1,0 +1,215 @@
+---
+title: "QED 10 -- Inventory, cross-checks, streamflow tiers (1981-2014)"
+subtitle: "CAMELS-India quantile mapping workflow, notebook 1 of 3"
+author: "Generated per Suggestion-workflow.md, Steps 1-4"
+output:
+   html_document:
+      css: style_academic.css
+---
+
+```{r source-setup, include=FALSE}
+knitr::purl("QED_00_setup.Rmd", file.path(tempdir(), "qed00_setup.R"), documentation = 2)
+source(file.path(tempdir(), "qed00_setup.R"))
+```
+
+# Notebook 1 -- Inventory & tiering
+
+**What this notebook does** (Steps 1-4 of `Suggestion-workflow.md`):
+
+1. **Inventory** the three ID sources (streamflow table, forcing CSVs, catchment
+   shapefile) and cross-check them. Any mismatch is written to a log -- nothing
+   is silently dropped.
+2. Build the **full daily index** for `r format(qed_period_start, "%Y-%m-%d")` to
+   `r format(qed_period_end, "%Y-%m-%d")` and measure, per catchment, how many
+   days have **valid observed streamflow**.
+3. Assign each catchment to a **tier** from its availability:
+   Tier 1 >= `r qed_tier1_min_availability`, Tier 2 >= `r qed_tier2_min_availability`,
+   below the `r qed_min_days_for_qm`-day floor -> Tier 3 (excluded from QM).
+4. **QA the reference forcings**: the fraction of valid days for
+   prcp / tmax / tmin inside the period; a catchment whose forcing availability
+   is below `r qed_forcing_min_availability` gets flagged (it is still corrected,
+   but with a warning logged).
+
+Run order: the first chunk purls and sources `QED_00_setup.Rmd` (configuration
++ helper library), then the code below.
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = TRUE, message = TRUE)
+```
+
+```{r log-file}
+qed_log_file <- file.path(qed_output_dir, "qed_10_log.txt")
+```
+
+```{r period-check}
+n_days <- as.integer(qed_period_end - qed_period_start) + 1L
+cat("Period:", format(qed_period_start), "to", format(qed_period_end),
+    "=", n_days, "days\n")
+stopifnot(n_days == 12418L)   # 34 years incl. 9 leap days
+```
+
+## 1. Inventory: three ID sources
+
+```{r inventory}
+# (a) Streamflow table: header columns after year/month/day are 4-digit ids
+sf_dt    <- data.table::fread(qed_streamflow_fp, nrows = 1)
+sf_ids   <- qed_normalize_id(names(sf_dt)[-c(1:3)])
+
+# (b) Forcing CSVs: file names are <gauge_id>.csv
+force_ids <- qed_normalize_id(tools::file_path_sans_ext(
+   list.files(qed_forcing_dir, pattern = "\\.csv$", full.names = FALSE)))
+
+# (c) Shapefile gauge ids (WGS 84, 472 polygons)
+cat("Reading shapefile...\n")
+sf_shp <- terra::vect(file.path(qed_project_root, "data_raw", "catchments",
+                                "merged", "all_catchments.shp"))
+shp_ids <- qed_normalize_id(sf_shp$gauge_id)
+
+cat("streamflow ids:", length(sf_ids),
+    "| forcing csvs:", length(force_ids),
+    "| shapefile:", length(shp_ids), "\n")
+```
+
+```{r cross-check}
+cross_check <- data.frame(
+   set_a = c("streamflow", "streamflow", "shapefile"),
+   set_b = c("forcings",   "shapefile", "forcings"),
+   n_a   = c(length(sf_ids), length(sf_ids), length(shp_ids)),
+   n_b   = c(length(force_ids), length(shp_ids), length(force_ids)),
+   in_a_not_b = c(
+      paste(setdiff(sf_ids, force_ids), collapse = ";"),
+      paste(setdiff(sf_ids, shp_ids), collapse = ";"),
+      paste(setdiff(shp_ids, force_ids), collapse = ";")),
+   in_b_not_a = c(
+      paste(setdiff(force_ids, sf_ids), collapse = ";"),
+      paste(setdiff(shp_ids, sf_ids), collapse = ";"),
+      paste(setdiff(force_ids, shp_ids), collapse = ";"))
+)
+cross_check$identical <- cross_check$in_a_not_b == "" &
+                         cross_check$in_b_not_a == ""
+data.table::fwrite(cross_check, file.path(qed_output_dir, "inventory_cross_check.csv"))
+print(cross_check)
+if (!all(cross_check$identical)) {
+   qed_log("ID SETS DIFFER between sources -- see inventory_cross_check.csv",
+           qed_log_file)
+}
+```
+
+The universe of catchments for this workflow is the **intersection** of all
+three sets (a catchment must have streamflow to tier, forcing to correct, and a
+polygon to georeference). Anything outside the intersection is logged.
+
+```{r universe}
+universe_ids <- Reduce(intersect, list(sf_ids, force_ids, shp_ids))
+excluded_universe <- setdiff(union(union(sf_ids, force_ids), shp_ids), universe_ids)
+if (length(excluded_universe) > 0) {
+   data.table::fwrite(
+      data.frame(id = excluded_universe,
+                 reason = "not in streamflow+forcing+shapefile intersection"),
+      file.path(qed_output_dir, "excluded_not_in_universe.csv"))
+   qed_log(paste(length(excluded_universe),
+                 "ids outside the 3-way intersection -> excluded_not_in_universe.csv"),
+           qed_log_file)
+}
+cat("Universe for QM:", length(universe_ids), "catchments\n")
+```
+
+## 2. Streamflow availability (1981-2014)
+
+```{r availability}
+sf_all <- data.table::fread(qed_streamflow_fp)
+sf_all[, date := as.Date(sprintf("%04d-%02d-%02d", year, month, day))]
+# Columns 4..(3+n_ids) are the gauge columns, in the same order as sf_ids
+sf_mat <- as.matrix(sf_all[date >= qed_period_start & date <= qed_period_end,
+                           .SD, .SDcols = names(sf_all)[4:(3 + length(sf_ids))]])
+mode(sf_mat) <- "numeric"
+sf_mat[!is.na(sf_mat) & sf_mat %in% qed_missing_flags] <- NA
+dimnames(sf_mat) <- list(NULL, sf_ids)   # normalized 5-digit ids
+```
+
+```{r availability-metrics}
+full_dates <- qed_full_dates()
+avail <- data.frame(
+   id                = sf_ids,
+   n_valid_days      = colSums(!is.na(sf_mat)),
+   availability_frac = round(colSums(!is.na(sf_mat)) / n_days, 4),
+   longest_gap_days  = apply(sf_mat, 2, function(v) qed_longest_run(!is.na(v))),
+   first_valid_date  = apply(sf_mat, 2, function(v) {
+      w <- which(!is.na(v)); if (length(w)) format(full_dates[w[1]]) else NA}),
+   last_valid_date   = apply(sf_mat, 2, function(v) {
+      w <- which(!is.na(v)); if (length(w)) format(full_dates[w[length(w)]]) else NA})
+)
+data.table::fwrite(avail, file.path(qed_output_dir, "availability_report.csv"))
+summary(avail$availability_frac)
+```
+
+## 3. Tier assignment
+
+```{r tiers}
+tier_assignment <- data.frame(
+   id = sf_ids,
+   availability_frac = avail$availability_frac,
+   n_valid_days = avail$n_valid_days,
+   stringsAsFactors = FALSE
+)
+tier_assignment$tier <- ifelse(
+   avail$n_valid_days < qed_min_days_for_qm,
+   "tier3_too_few_days",
+   ifelse(avail$availability_frac >= qed_tier1_min_availability, "tier1",
+   ifelse(avail$availability_frac >= qed_tier2_min_availability, "tier2",
+          "tier3_low_availability")))
+data.table::fwrite(tier_assignment,
+                   file.path(qed_output_dir, "tier_assignment.csv"))
+table(tier_assignment$tier)
+
+for (t in c("tier1", "tier2", "tier3_too_few_days", "tier3_low_availability")) {
+   ids <- tier_assignment$id[tier_assignment$tier == t]
+   writeLines(ids, file.path(qed_output_dir, paste0(t, "_ids.txt")))
+}
+```
+
+## 4. Forcing QA (reference availability)
+
+```{r forcing-qa}
+force_ids_u <- intersect(universe_ids, force_ids)
+qa_rows <- lapply(force_ids_u, function(id) {
+   f <- qed_read_forcing(file.path(qed_forcing_dir, paste0(id, ".csv")))
+   w <- f$date >= qed_period_start & f$date <= qed_period_end
+   fs <- f[w]
+   data.frame(
+      id = id,
+      n_rows = nrow(fs),
+      prcp_frac = round(mean(!is.na(fs[["prcp(mm/day)"]])), 4),
+      tmax_frac = round(mean(!is.na(fs[["tmax(C)"]])), 4),
+      tmin_frac = round(mean(!is.na(fs[["tmin(C)"]])), 4)
+   )
+})
+forcing_qa <- data.table::rbindlist(qa_rows)
+forcing_qa$forcing_ok <-
+   forcing_qa$prcp_frac >= qed_forcing_min_availability &
+   forcing_qa$tmax_frac >= qed_forcing_min_availability &
+   forcing_qa$tmin_frac >= qed_forcing_min_availability
+data.table::fwrite(forcing_qa, file.path(qed_output_dir, "forcing_availability.csv"))
+table(forcing_qa$forcing_ok)
+```
+
+## Final tier table (tiers are only actionable where forcing QA passes)
+
+```{r final-tiers}
+final <- merge(tier_assignment, forcing_qa[, c("id", "forcing_ok")], by = "id", all.x = TRUE)
+final$final_action <- ifelse(is.na(final$forcing_ok), "excluded_no_forcing",
+                      ifelse(!final$forcing_ok, "correct_with_warning",
+                             final$tier))
+data.table::fwrite(final, file.path(qed_output_dir, "inventory.csv"))
+print(table(final$final_action))
+qed_log(paste0("Notebook 10 done. Tiers: T1=", sum(final$tier == "tier1"),
+               " T2=", sum(final$tier == "tier2"),
+               " T3=", sum(grepl("^tier3", final$tier))), qed_log_file)
+```
+
+## Take-away
+
+- The R session now has `final` (one row per catchment: availability, tier,
+  forcing QA, final action) -- the single source of truth for notebook 20.
+- All decision tables are persisted under
+  `r qed_output_dir`, so no step below re-derives a tier.

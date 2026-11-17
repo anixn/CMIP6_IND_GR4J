@@ -1,0 +1,14 @@
+2026-11-17 13:31:01 | ERROR 03005 'DatesR' must be defined as 'POSIXlt' or 'POSIXct' 
+2026-11-17 13:31:01 | ERROR 03008 'DatesR' must be defined as 'POSIXlt' or 'POSIXct' 
+2026-11-17 13:31:01 | HYD_20 done: 0 calibrated 
+2026-11-17 13:31:14 | ERROR 03005 argument "FUN_MOD" is missing, with no default 
+2026-11-17 13:31:14 | ERROR 03008 argument "FUN_MOD" is missing, with no default 
+2026-11-17 13:31:14 | HYD_20 done: 0 calibrated 
+2026-11-17 13:31:33 | ERROR 03005 argument "FUN_MOD" is missing, with no default 
+2026-11-17 13:31:33 | ERROR 03008 argument "FUN_MOD" is missing, with no default 
+2026-11-17 13:31:33 | HYD_20 done: 0 calibrated 
+2026-11-17 13:31:55 | ERROR 03005 argument "CalibOptions" is missing, with no default 
+2026-11-17 13:31:55 | ERROR 03008 argument "CalibOptions" is missing, with no default 
+2026-11-17 13:31:55 | HYD_20 done: 0 calibrated 
+2026-11-17 13:32:25 | HYD_20 done: 2 calibrated 
+2026-11-17 13:41:37 | HYD_20 done: 192 calibrated 
