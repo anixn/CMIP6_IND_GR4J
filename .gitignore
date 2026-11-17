@@ -27,6 +27,7 @@ data_processed/hyd/model_inputs/
 
 # ---- LaTeX build artefacts ----
 *.aux
+*.log
 *.bbl
 *.blg
 *.fdb_latexmk
