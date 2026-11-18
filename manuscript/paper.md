@@ -60,8 +60,8 @@ Scenario-driven water-availability and drought studies over Indian catchments de
 
 ### 4.2 Phase methods (specified; to be executed — see phase map in `AGENTS.md`)
 - **Low-flow metric layer (O1)**: logNSE, Q95 bias, low-flow volume bias (below observed Q90), dry-spell bias, mean annual 7-day minimum bias — computed 2001–2014 only; composite rank after pairwise ρ>0.9 de-duplication.
-- **GR6J axis (O2)**: GR6J (6 parameters) via airGR, identical inputs/windows/warm-up/optimizer as GR4J, calibrated on the same 192 catchments; divergence `div = (GR6J−GR4J)/GR4J` per model × catchment × SSP × metric; stratified by aridity and baseflow-index proxy; ANOVA-style structure test.
-- **Propagation (O3)**: SPI-12/SRI-12 (gamma fit, fixed convention); propagation time = SPI–SRI cross-correlation lag (0–12 months) — **never** inferred from SPI≈SRI near-identity; pre-registered tolerance band on observed propagation **before** any model comparison; propagation rate = share of SPI≤−1 months followed by SRI≤−1 within the window.
+- **GR6J axis (O2)**: GR6J (6 parameters) via airGR, identical inputs/windows/warm-up/optimizer as GR4J, calibrated on the same catchments; divergence `div = GR6J − GR4J` (difference for logNSE; percentage points for the % bias metrics — not divided by GR4J, which would explode near zero biases; documented deviation, pre-registered in `GR6J_00_setup.Rmd`); stratified by aridity tercile (annual PET/P); materiality thresholds pre-registered (logNSE ≥ 0.10 or ≥ 10 pp); direction reported, never claimed as superiority.
+- **Propagation (O3)**: SPI-12/SRI-12 (gamma-MLE + normal-quantile transform, identical convention both sides); propagation time **defined exclusively** as the SPI–SRI cross-correlation lag (0–12 months, ties → smallest) — **never** inferred from SPI≈SRI near-identity (the Machhar-type artefact; mean |SRI−SPI| computed as diagnostic only); tolerance band `|L_model − L_obs| ≤ 1 month` and the falsification rule (all models ≥ 80% reproduced AND spread < 0.10 AND ρ(forcing rank, prop_share) > 0.6) pre-registered in `PROP_PRE_REGISTRATION.md` (18 Nov 2026) **before** any model SRI was computed; observed lags frozen (167 catchments).
 - **Decomposition (O4)**: multi-way ANOVA / variance components of Q95 change, 7-day min change, low-flow volume change ~ GCM × structure × tail policy, blocking by catchment type; bootstrap CIs (≥1000 resamples, recorded seed); responses never blended.
 - **Benchmark (O5)**: same low-flow metric suite applied to CAMELS-IND-Proj historical-per-GCM runs (skill) and 2015–2100 projections (projected change); distributions and per-catchment win rates, stratified by confidence flag and aridity; the LSTM product is benchmarked, never regenerated.
 
@@ -93,6 +93,17 @@ Scenario-driven water-availability and drought studies over Indian catchments de
 - Volume-bias standouts: NorESM2-MM −4.3%, HadGEM3-GC31-MM +0.4%, MIROC6 +3.9%, MPI-ESM1-2-HR +5.3%.
 - Extrapolation exposure: 0.05% of scored forcing values, 0.13% of discharge-evaluation values — future windows will raise this (motivating the linear pr tail policy in projections).
 - From the forcing-only top-14, GISS-E2-1-G (discharge 21/22) and INM-CM5-0 (20/22) were dropped; MPI-ESM1-2-HR (5/22) and GFDL-ESM4 (9/22) added — the first application of the framework's own principle.
+
+### 5.1 H1 verdict: forcing rank vs low-flow rank (Phase 1, executed 18 Nov 2026)
+
+The low-flow metric layer (`metric_version v1`, pre-registered) was computed for all 22 models on the full calibrated roster (192 catchments × 22 models = 21,120 metric rows, evaluation window 2001–2014 only). After the guardrail-5 de-duplication (q95_bias dropped: ρ = 0.937 with mam7_bias), the composite low-flow ranking was built on the 78 catchments with non-ephemeral observed low flows (complete rows on logNSE, lf_volume_bias, dry_spell_bias, mam7_bias).
+
+**H1 is SUPPORTED.** The pooled Spearman correlation between the forcing-composite rank (QED_30) and the low-flow-composite rank is **ρ = −0.027** (catchment-bootstrap 95% CI [−0.095, 0.038]; 1,000 resamples, seed 20261118) — far below the pre-registered failure threshold of 0.6, and essentially zero rather than merely weak: the re-estimated wedge is *stronger* than the pilot estimate (ρ = 0.14), which used a Tier-1-only roster and mean-flow discharge ranks. Forcing-skill selection carries essentially no information about low-flow skill; the two-stage framework is retained as designed (verdict file: `data_processed/lowflow/h1_verdict.md`).
+
+Two mechanistic observations from the metric layer, reported as findings (not tuned):
+
+- On ephemeral catchments, CMIP-driven GR4J keeps baseflow running where the observed stream nearly dries up (simulated 10th-percentile flow ≈ 7× observed; simulated series never fall below the observed Q90 threshold → dry-spell bias −100%), while underestimating mean flow on the same catchments. Whole-flow KGE is nearly blind to this; the low-flow metrics are not — the empirical basis of the divergence.
+- Observed SPI-12→SRI-12 propagation lags (frozen, 167 catchments) concentrate at 0–1 months (median 1; 150/167), with the mean |SRI−SPI| diagnostic ≈ 0.4–0.7 — far from the ≈0.013 Machhar-type coupling-artefact signature, confirming the observed benchmark is fit for the H3 comparison.
 
 ## 6. Limitations
 
