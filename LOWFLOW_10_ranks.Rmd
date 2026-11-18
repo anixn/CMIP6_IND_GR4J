@@ -1,0 +1,250 @@
+---
+title: "LOWFLOW 10 -- Low-flow-aware model ranking & H1 verdict (de-dup, composite, divergence test)"
+subtitle: "Phase 1 of the low-flow framework (H1 / Objective 1) -- consumes LOWFLOW_00 outputs; parallel module"
+output:
+   html_document:
+      css: style_academic.css
+---
+
+```{r source-setup, include=FALSE}
+knitr::purl("HYD_00_setup.Rmd", file.path(tempdir(), "hyd00_setup.R"), documentation = 2)
+source(file.path(tempdir(), "hyd00_setup.R"))
+```
+
+# Notebook 10 -- Low-flow-aware model ranking & the H1 verdict
+
+**What this notebook does.** Consumes `data_processed/lowflow/`
+(`lowflow_metrics_wide.csv`, `metric_pairwise_rho.csv`) and:
+
+1. **De-duplicates metrics** before any averaging (AGENTS.md guardrail 5):
+   walks metric pairs in descending |rho|; for every pair with
+   |rho| > 0.9 drops the member that is more correlated with the *rest*
+   of the suite. Every drop decision + reason is written to
+   `metric_dedup_decision.csv`. Nothing is averaged before this step.
+2. **Builds the low-flow-aware ranking**: per catchment, models are ranked on
+   each kept metric (lower = better; logNSE reversed), ranks averaged within
+   catchment, then rank sums aggregated across catchments into the composite
+   low-flow ranking (same construction as the HYD_30 discharge ranking, so
+   the two are directly comparable).
+3. **Tests H1** (decision rule, pre-registered in AGENTS.md 18 Nov 2026):
+   *forcing-skill rank and low-flow-skill rank diverge; the framework fails
+   if the pooled rank correlation rho > 0.6, in which case it collapses to
+   one stage and the paper must say so.*
+   Pooled rho = Spearman between the QED_30 forcing composite rank and the
+   low-flow composite rank over the 22 models, with a catchment-bootstrap
+   CI (1,000 resamples, fixed seed) so the verdict carries uncertainty.
+4. Writes `h1_verdict.md` -- the contract between analysis and paper: no
+   results section without it.
+
+**Requires:** `LOWFLOW_00_metrics.Rmd` has completed (its wide metrics table
+exists and the pairwise-rho table exists).
+
+```{r log-file}
+low_output_dir <- file.path(hyd_project_root, "data_processed", "lowflow")
+low_log_file   <- file.path(low_output_dir, "lowflow_10_log.txt")
+wide_fp <- file.path(low_output_dir, "lowflow_metrics_wide.csv")
+stopifnot(file.exists(wide_fp))   # LOWFLOW_00 must have run
+```
+
+## 1. Configuration
+
+```{r config}
+# direction of each metric: TRUE = higher value is better
+low_metric_better_high <- c(logNSE = TRUE, q95_bias = FALSE,
+                            lf_volume_bias = FALSE, dry_spell_bias = FALSE,
+                            mam7_bias = FALSE)
+low_dedup_rho_max <- 0.9      # guardrail 5 threshold
+low_h1_rho_fail   <- 0.6      # H1 decision rule threshold (pre-registered)
+low_min_catchments_share <- 0.8   # model must have metrics for >= 80% of the
+                                  # catchment roster to be ranked
+low_n_boot   <- 1000L
+low_boot_seed <- 20261118L
+```
+
+## 2. Load metrics + roster
+
+```{r load}
+wide <- data.table::fread(wide_fp, colClasses = list(character = "catchment"))
+low_metrics_vec <- names(low_metric_better_high)
+cat("metric rows:", nrow(wide), "| models:",
+    data.table::uniqueN(wide$model), "| catchments:",
+    data.table::uniqueN(wide$catchment), "\n")
+
+# catchment roster: catchments with at least one valid metric row
+roster <- unique(wide[!is.na(logNSE), .(catchment)])
+cat("roster (catchments with computable metrics):", nrow(roster), "\n")
+
+# model coverage check (no silent shrinkage of the model set)
+cov <- wide[!is.na(logNSE), .(n_catch = data.table::uniqueN(catchment)), by = model]
+cov[, share := n_catch / nrow(roster)]
+models_keep <- cov[share >= low_min_catchments_share, model]
+models_drop <- cov[share <  low_min_catchments_share, model]
+if (length(models_drop)) {
+   cat("DROPPED from ranking (coverage < ", low_min_catchments_share, "):",
+       paste(models_drop, collapse = ", "), "\n")
+   writeLines(
+      paste0(format(Sys.time()),
+             " | LOWFLOW_10 dropped models for low coverage: ",
+             paste(models_drop, collapse = ", ")),
+      low_log_file, append = TRUE)
+}
+wide <- wide[model %in% models_keep]
+```
+
+## 3. Metric de-duplication (guardrail 5 -- inspect before compositing)
+
+```{r dedup, eval=TRUE}
+# authoritative pairwise rho: recomputed here from the wide metrics so the
+# decision is self-contained (metric_pairwise_rho.csv from LOWFLOW_00 is the
+# cross-check)
+avail <- intersect(names(low_metric_better_high), names(wide))
+vals <- wide[, .SD, .SDcols = avail]
+rho_emp <- stats::cor(vals, method = "spearman",
+                      use = "pairwise.complete.obs")
+print(round(rho_emp, 3))
+
+# walk pairs in descending |rho|; drop the member more correlated with the rest
+kept <- avail; drop_log <- list()
+repeat {
+   if (length(kept) < 3) break
+   r <- abs(rho_emp[kept, kept, drop = FALSE]); diag(r) <- 0
+   i_max <- arrayInd(which.max(r), dim(r))
+   if (r[i_max[1], i_max[2]] <= low_dedup_rho_max) break
+   m1 <- kept[i_max[1]]; m2 <- kept[i_max[2]]
+   others <- setdiff(kept, c(m1, m2))
+   if (!length(others)) {
+      drop <- if (m1 == "logNSE") m2 else m1
+   } else {
+      mean1 <- mean(rho_emp[m1, others]); mean2 <- mean(rho_emp[m2, others])
+      # drop the more redundant member; on ties keep logNSE (reference skill)
+      drop <- if (mean1 > mean2) m1 else if (mean2 > mean1) m2 else
+                 if (m1 == "logNSE") m2 else m1
+   }
+   kept <- setdiff(kept, drop)
+   drop_log[[length(drop_log) + 1L]] <- data.table::data.table(
+      module = "LOWFLOW_10",
+      metric_pair = paste(m1, m2, sep = "~"),
+      abs_rho = round(rho_emp[m1, m2], 3),
+      dropped = drop, kept = paste(kept, collapse = "+"),
+      reason = "pairwise_rho_above_0.9",
+      decided_on = format(Sys.time(), "%Y-%m-%d"))
+}
+dedup_dt <- data.table::rbindlist(drop_log, use.names = TRUE, fill = TRUE)
+data.table::fwrite(dedup_dt,
+                   file.path(low_output_dir, "metric_dedup_decision.csv"))
+cat("kept metrics:", paste(kept, collapse = ", "), "\n")
+if (nrow(dedup_dt)) print(dedup_dt)
+```
+
+## 4. Low-flow-aware composite ranking
+
+```{r ranking}
+# per-catchment ranks on kept metrics (lower = better), then mean of ranks
+lowflow_ok <- wide[!is.na(get(kept[1])), ]
+lowflow_ok[, n_kept_ok := rowSums(!is.na(.SD)), .SDcols = kept]
+lowflow_ok <- lowflow_ok[n_kept_ok == length(kept)]   # rank on complete rows
+
+for (m in kept) {
+   dirv <- if (low_metric_better_high[[m]]) -1 else 1
+   lowflow_ok[, paste0("rk_", m) :=
+                 data.table::frank(dirv * get(m), ties.method = "average",
+                                   na.last = "keep"),
+              by = catchment]
+}
+rk_cols <- paste0("rk_", kept)
+lowflow_ok[, lowflow_rank_mean := rowMeans(.SD), .SDcols = rk_cols]
+
+# model-level composite: sum of per-catchment mean ranks (HYD_30 construction)
+lf_table <- lowflow_ok[, .(
+   n_catchments = data.table::uniqueN(catchment),
+   mean_lowflow_rank = round(mean(lowflow_rank_mean), 3),
+   median_logNSE = round(stats::median(logNSE, na.rm = TRUE), 3),
+   median_q95_bias = round(stats::median(q95_bias, na.rm = TRUE), 2),
+   median_lf_volume_bias = round(stats::median(lf_volume_bias, na.rm = TRUE), 2),
+   median_dry_spell_bias = round(stats::median(dry_spell_bias, na.rm = TRUE), 2),
+   median_mam7_bias = round(stats::median(mam7_bias, na.rm = TRUE), 2)
+), by = model]
+lf_table[, composite_rank_sum := round(sum(mean_lowflow_rank), 1), by = model]
+lf_table <- lf_table[, .SD[1], by = model]
+lf_table <- lf_table[order(mean_lowflow_rank)]
+lf_table[, lowflow_rank := seq_len(.N)]
+data.table::fwrite(lf_table,
+                   file.path(low_output_dir, "model_ranking_lowflow.csv"))
+print(lf_table[, .(lowflow_rank, model, mean_lowflow_rank,
+                   median_logNSE, median_q95_bias, n_catchments)])
+```
+
+## 5. H1 verdict: forcing rank vs low-flow rank
+
+```{r h1}
+qed_rank <- data.table::fread(file.path(hyd_qed_dir,
+                                        "model_ranking_overall.csv"))
+qed_rank[, forcing_rank := seq_len(.N)]
+
+cmp <- merge(qed_rank[, .(model, forcing_rank)],
+             lf_table[, .(model, lowflow_rank)], by = "model")
+stopifnot(nrow(cmp) >= 10)
+rho_h1 <- suppressWarnings(
+   stats::cor(cmp$forcing_rank, cmp$lowflow_rank, method = "spearman"))
+
+# catchment-bootstrap CI: resample catchments, rebuild the composite from
+# per-catchment mean ranks, re-correlate (fixed, recorded seed)
+set.seed(low_boot_seed)
+catchments <- sort(unique(lowflow_ok$catchment))
+boot <- vapply(seq_len(low_n_boot), function(b) {
+   pick <- sample(catchments, size = length(catchments), replace = TRUE)
+   sub  <- lowflow_ok[catchment %in% pick,
+                      .(model, r = mean(lowflow_rank_mean)), by = model]
+   agg  <- sub[, .(rr = mean(r)), by = model]
+   mrg  <- merge(qed_rank[, .(model, forcing_rank)],
+                 agg[, .(model, lowflow_rank = frank(rr))], by = "model")
+   if (nrow(mrg) < 10) return(NA_real_)
+   suppressWarnings(stats::cor(mrg$forcing_rank, mrg$lowflow_rank,
+                               method = "spearman"))
+}, numeric(1))
+ci <- stats::quantile(boot, probs = c(0.025, 0.975), na.rm = TRUE)
+
+fails_h1 <- !is.na(rho_h1) && rho_h1 > low_h1_rho_fail
+verdict  <- if (is.na(rho_h1)) "INDETERMINATE" else if (fails_h1) "FAILS" else "SUPPORTED"
+
+h1_lines <- c(
+   "# H1 verdict -- forcing rank vs low-flow rank",
+   "",
+   paste0("**Date:** ", format(Sys.time()),
+          " | **metric_version:** ",
+          data.table::fread(file.path(low_output_dir, "lowflow_metrics.csv"),
+                            select = "metric_version")[1]),
+   paste0("**Rule (pre-registered 18 Nov 2026, AGENTS.md):** H1 fails if the ",
+          "pooled Spearman rho > ", low_h1_rho_fail,
+          "; negative results are results."),
+   "",
+   paste0("**Pooled rho (forcing composite rank vs low-flow composite rank):** ",
+          sprintf("%.3f", rho_h1)),
+   paste0("**Bootstrap 95% CI (", low_n_boot,
+          " catchment resamples, seed ", low_boot_seed, "):** ",
+          sprintf("[%.3f, %.3f]", ci[1], ci[2])),
+   paste0("**Verdict: ", verdict, "**"),
+   "",
+   "Interpretation: a rho near zero means low-flow skill is nearly",
+   "uncorrelated with whole-flow/forcing skill -- the two-stage framework",
+   "carries information a forcing-only selection would miss. A rho > ",
+   low_h1_rho_fail, " would collapse the framework to one stage and the",
+   "paper must report that honestly.",
+   "",
+   paste0("Models ranked: ", nrow(cmp), " | catchments: ", length(catchments),
+          " | metrics kept after de-dup: ", paste(kept, collapse = ", ")))
+writeLines(h1_lines, file.path(low_output_dir, "h1_verdict.md"))
+cat("H1 pooled rho =", round(rho_h1, 3), "| CI [",
+    round(ci[1], 3), ",", round(ci[2], 3), "] |", verdict, "\n")
+
+data.table::fwrite(cmp, file.path(low_output_dir, "h1_rank_pairs.csv"))
+```
+
+## Take-away
+
+- `model_ranking_lowflow.csv` -- the low-flow-aware ranking (O1 deliverable).
+- `h1_verdict.md` -- the H1 verdict file; **the paper's results section is
+  written against this file, not against memory** (AGENTS.md convention).
+- `metric_dedup_decision.csv` -- the auditable de-duplication record.
+- If H1 fails (rho > 0.6): report, do not tune; the framework collapses to a
+  single-stage selection and P1 reframes accordingly.
