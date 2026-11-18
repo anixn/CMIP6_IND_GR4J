@@ -22,6 +22,10 @@ data_processed/qed/qm_params/
 data_processed/qed/qm_corrected/
 data_processed/hyd/model_inputs/
 
+# ---- SSP leg bulk outputs (regenerate with QED_50_ssp_apply.Rmd) ----
+data_processed/ssp/qm_params/
+data_processed/ssp/qm_corrected/
+
 # ---- rendered notebooks (regenerate by knitting) ----
 *.html
 

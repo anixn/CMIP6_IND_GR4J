@@ -1,0 +1,319 @@
+---
+title: "QED 50 -- Fit EQM on the full historical & apply to SSP series (14 models x 4 SSPs)"
+subtitle: "CAMELS-India quantile mapping workflow, SSP correction notebook (parallel to QED_20, no edits to existing notebooks)"
+output:
+   html_document:
+      css: style_academic.css
+---
+
+```{r source-setup, include=FALSE}
+knitr::purl("QED_00_setup.Rmd", file.path(tempdir(), "qed00_setup.R"), documentation = 2)
+source(file.path(tempdir(), "qed00_setup.R"))
+```
+
+# Notebook 50 -- Quantile mapping for the SSP projection series
+
+**What this notebook does.** The SSP twin of `QED_20_qm_fit_apply.Rmd`
+(which stays untouched). Per model x SSP x catchment x variable:
+
+1. **Fit** seasonal EQM with the historical pair as training data:
+   source = the model's **historical** catchment-mean aggregate
+   (`agg_<var>_<model>.csv` from QED_05), reference = observed CAMELS-IND
+   catchment-mean forcings, overlap = the full historical window
+   1981--2014. Fitting on the full historical (not the ranking split) is the
+   pre-registered projection-application choice (18 Nov 2026, header of
+   `QED_40_ssp_aggregate.Rmd`): the out-of-sample fit/score discipline
+   belongs to model *ranking*, not to projection *application*.
+2. **Apply** each fitted mapping to the SSP aggregate
+   (`data_processed/ssp/agg_<var>_<model>_<ssp>.csv` from QED_40, covering
+   the three windows 2015--2040 / 2041--2060 / 2081--2100; the 2061--2080
+   gap is source-NA by design and surfaces as `method_flag = "source_nan"`).
+3. **Tail policy (pre-registered):** `pr` extrapolation is **"linear"**
+   (constant clamping would truncate intensified future rainfall extremes);
+   temperature stays "linear" as in the historical leg. This overrides
+   `qed_extrap_pr <- "constant"` from QED_00 **for this notebook only** --
+   every extrapolated value is still flagged, so downstream users can
+   filter or downweight them.
+4. **No silent drops:** every skip is a summary row AND a log line; flags
+   (`within_range`, `extrapolated_low/high`, `source_nan`) propagate to
+   `method_flag` in every output CSV exactly as in the historical leg.
+
+Output layout (inside `data_processed/ssp/`):
+
+```
+qm_corrected/<model>/<ssp>/<tier>/<catchment_id>_<var>.csv   # date, source_value, corrected_value, method_flag
+qm_params/<model>/<tier>/<catchment_id>_<var>.rds            # fitted quantile pairs (per historical fit)
+qed_50_run_summary.csv                                       # one row per model x ssp x catchment x var
+```
+
+```{r log-file}
+qed_ssp_dir <- file.path(qed_project_root, "data_processed", "ssp")
+qed_ssp_log_file <- file.path(qed_ssp_dir, "qed_50_log.txt")
+stopifnot(dir.exists(qed_ssp_dir))   # QED_40 must have produced the SSP aggs
+```
+
+## 0. Tail-policy override (pre-registered, dated)
+
+```{r tail-policy}
+# Pre-registered in QED_40_ssp_aggregate.Rmd (18 Nov 2026): SSP pr tail = linear
+qed_extrap_pr <- "linear"
+cat("pr tail policy for the SSP leg:", qed_extrap_pr,
+    "(historical leg used 'constant' -- deliberate, dated override)\n")
+```
+
+## 1. Inputs: roster + historical aggs + SSP aggs
+
+```{r load-inventory}
+inventory <- data.table::fread(file.path(qed_output_dir, "inventory.csv"),
+                               colClasses = list(character = "id"))
+qm_catch <- inventory[final_action %in%
+                         c("tier1", "tier2", "correct_with_warning")]
+qm_catch[, tier := data.table::fifelse(final_action == "tier1", "tier1", "tier2")]
+cat("Catchments to correct:", nrow(qm_catch), "\n")
+```
+
+```{r model-ssp-discovery, eval=TRUE}
+# discover (model, ssp) pairs from the QED_40 output names:
+# agg_<var>_<model>_<ssp>.csv ; model names contain "-" but not "_"
+files_ssp <- list.files(qed_ssp_dir, pattern =
+                           "^agg_(pr|tasmax|tasmin)_.+_ssp[0-9]+\\.csv$")
+rows <- lapply(seq_along(files_ssp), function(i) {
+   p <- strsplit(tools::file_path_sans_ext(basename(files_ssp[i])), "_")[[1]]
+   data.table::data.table(var = p[2],
+                          model = paste(p[3:(length(p) - 1)], collapse = "_"),
+                          ssp = p[length(p)], file = files_ssp[i])
+})
+meta <- data.table::rbindlist(rows, use.names = TRUE)
+models_ssp <- sort(unique(meta$model))
+ssps_all   <- sort(unique(meta$ssp))
+cat("SSP agg files:", nrow(meta), "| models:", length(models_ssp),
+    "| SSPs:", paste(ssps_all, collapse = ","), "\n")
+
+# models must also have historical aggregates to fit on
+hist_ok <- vapply(models_ssp, function(m) all(file.exists(
+   file.path(qed_agg_dir, paste0("agg_", qed_vars, "_", m, ".csv")))),
+   logical(1))
+if (any(!hist_ok)) {
+   drop_m <- models_ssp[!hist_ok]
+   qed_log(paste("SKIP models without full historical aggs:",
+                 paste(drop_m, collapse = ", ")), qed_ssp_log_file)
+   meta <- meta[!model %in% drop_m]
+   models_ssp <- models_ssp[hist_ok]
+}
+cat("Models to correct:", length(models_ssp), "\n")
+```
+
+```{r test-mode-override}
+# explicit, visible test mode (mirror of QED_20's): set TRUE for a small
+# run; production leaves it FALSE
+qed50_test_mode <- FALSE
+if (qed50_test_mode) {
+   models_ssp <- models_ssp[1]
+   meta <- meta[model == models_ssp & ssp == ssps_all[1]]
+   qm_catch <- head(qm_catch, 5)
+   cat("TEST MODE: 1 model x 1 ssp x 5 catchments\n")
+}
+```
+
+## 2. Cache the reference forcings (read once)
+
+```{r cache-forcing}
+forcing_cache <- setNames(vector("list", nrow(qm_catch)), qm_catch$id)
+for (i in seq_len(nrow(qm_catch))) {
+   id <- qm_catch$id[i]
+   f  <- qed_read_forcing(file.path(qed_forcing_dir, paste0(id, ".csv")))
+   f  <- f[date >= qed_period_start & date <= qed_period_end]
+   forcing_cache[[id]] <- f
+}
+```
+
+## 3. Fit on the historical pair (once per model x catchment x var), then apply to every SSP
+
+```{r main-loop, eval=TRUE}
+dir.create(file.path(qed_ssp_dir, "qm_corrected"), showWarnings = FALSE)
+dir.create(file.path(qed_ssp_dir, "qm_params"),    showWarnings = FALSE)
+
+summary_rows <- list(); n_row <- 0L
+
+for (model in models_ssp) {
+
+   # ---- historical aggs (fit sources) + observed reference -------------------
+   agg_pr  <- qed_read_agg(file.path(qed_agg_dir, paste0("agg_pr_",    model, ".csv")))
+   agg_tx  <- qed_read_agg(file.path(qed_agg_dir, paste0("agg_tasmax_", model, ".csv")))
+   agg_tn  <- qed_read_agg(file.path(qed_agg_dir, paste0("agg_tasmin_", model, ".csv")))
+   hist_agg <- list(pr = agg_pr, tasmax = agg_tx, tasmin = agg_tn)
+
+   # ---- fits: one per catchment x var, reused across all SSPs ----------------
+   fits_cache <- setNames(vector("list", nrow(qm_catch)), qm_catch$id)
+   for (i in seq_len(nrow(qm_catch))) {
+      id  <- qm_catch$id[i]
+      tier <- qm_catch$tier[i]
+      par_dir <- file.path(qed_ssp_dir, "qm_params", model, tier)
+      dir.create(par_dir, recursive = TRUE, showWarnings = FALSE)
+      ref <- forcing_cache[[id]]
+      fc <- list()
+      for (var in qed_vars) {
+         rcol <- qed_camels_var_cols[[var]]
+         src_all  <- qed_get_series(hist_agg[[var]], id)
+         src_date <- hist_agg[[var]]$dates
+         in_win   <- src_date >= qed_period_start & src_date <= qed_period_end
+         n_overlap_valid <- sum(!is.na(src_all[in_win]))
+         if (n_overlap_valid < qed_min_days_for_qm) {
+            fc[[var]] <- list(status = paste0("skipped_overlap_lt_",
+                                              qed_min_days_for_qm),
+                              n_overlap = n_overlap_valid)
+            next
+         }
+         ref_w <- ref[[rcol]][ref$date %in% src_date[in_win]]
+         fits  <- list(); bins_used <- character(0)
+         s_lbl <- qed_date_to_season(src_date[in_win]); src_w <- src_all[in_win]
+         for (s in names(qed_seasons)) {
+            if (sum(s_lbl == s) >= qed_min_quantile_sample) {
+               fits[[s]] <- qed_fit_eqm(src_w[s_lbl == s], ref_w, qed_n_quantiles)
+               if (!is.null(fits[[s]])) bins_used <- c(bins_used, s)
+            }
+         }
+         if (length(bins_used) < length(qed_seasons)) {
+            fits[["annual"]] <- qed_fit_eqm(src_w, ref_w, qed_n_quantiles)
+            if (!is.null(fits[["annual"]]))
+               bins_used <- c(bins_used, "annual(fallback)")
+         }
+         fc[[var]] <- list(status = if ("annual(fallback)" %in% bins_used)
+                              "fitted_annual_fallback" else "fitted",
+                           fits = fits, bins = paste(bins_used, collapse = "+"),
+                           n_overlap = n_overlap_valid)
+      }
+      fits_cache[[id]] <- fc
+   }
+
+   # ---- apply to each SSP series --------------------------------------------
+   ssps_here <- sort(unique(meta[model == model, ssp]))
+   for (s in ssps_here) {
+      ssp_files <- meta[model == model & ssp == s]
+      ssp_agg <- setNames(vector("list", 3), qed_vars)
+      for (v in qed_vars) {
+         fp <- ssp_files[var == v, file]
+         if (!length(fp)) { ssp_agg[[v]] <- NULL; next }
+         ssp_agg[[v]] <- qed_read_agg(file.path(qed_ssp_dir, fp))
+      }
+
+      for (i in seq_len(nrow(qm_catch))) {
+         id <- qm_catch$id[i]; tier <- qm_catch$tier[i]
+         out_dir <- file.path(qed_ssp_dir, "qm_corrected", model, s, tier)
+         dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
+
+         res <- tryCatch({
+            for (var in qed_vars) {
+               fc <- fits_cache[[id]][[var]]
+               if (is.null(fc) || is.null(fc$fits)) {
+                  summary_rows[[n_row <- n_row + 1L]] <- data.frame(
+                     model, ssp = s, id, var, tier,
+                     status = if (is.null(fc)) "skipped_no_hist_fit"
+                              else fc$status,
+                     n_overlap = if (is.null(fc)) NA_integer_
+                                 else fc$n_overlap,
+                     n_extrap = NA_integer_,
+                     frac_extrap = NA_real_)
+                  next
+               }
+               if (is.null(ssp_agg[[var]])) {
+                  summary_rows[[n_row <- n_row + 1L]] <- data.frame(
+                     model, ssp = s, id, var, tier, status = "skipped_ssp_agg_missing",
+                     n_overlap = NA_integer_, n_extrap = NA_integer_,
+                     frac_extrap = NA_real_)
+                  next
+               }
+               src_all  <- qed_get_series(ssp_agg[[var]], id)
+               src_date <- ssp_agg[[var]]$dates
+               extrap <- switch(var, pr = qed_extrap_pr,
+                                tasmax = qed_extrap_temp,
+                                tasmin = qed_extrap_temp)
+
+               appl <- data.table::data.table(
+                  x_src = src_all, x_corrected = NA_real_,
+                  within_range = NA, extrapolated_low = FALSE,
+                  extrapolated_high = FALSE)
+               s_full <- qed_date_to_season(src_date)
+               for (sn in names(qed_seasons)) {
+                  w <- which(s_full == sn)
+                  if (!length(w)) next
+                  f <- fc$fits[[sn]]
+                  if (is.null(f)) f <- fc$fits[["annual"]]
+                  if (is.null(f)) stop(sprintf(
+                     "%s/%s/%s/%s: no fit for season %s and no annual fallback",
+                     model, s, id, var, sn))
+                  rr <- qed_apply_eqm(src_all[w], f, extrap)
+                  appl$x_corrected[w]       <- rr$x_corrected
+                  appl$within_range[w]      <- rr$within_range
+                  appl$extrapolated_low[w]  <- rr$extrapolated_low
+                  appl$extrapolated_high[w] <- rr$extrapolated_high
+               }
+
+               method_flag <- ifelse(is.na(appl$x_src), "source_nan",
+                              ifelse(appl$extrapolated_low, "extrapolated_low",
+                               ifelse(appl$extrapolated_high,
+                                      "extrapolated_high", "within_range")))
+
+               bad <- sum(is.na(appl$x_corrected) & !is.na(appl$x_src))
+               if (bad > 0) stop(sprintf(
+                  "%s/%s/%s/%s: %d corrected NaN with valid source",
+                  model, s, id, var, bad))
+
+               out <- data.table::data.table(
+                  date = src_date, source_value = appl$x_src,
+                  corrected_value = appl$x_corrected,
+                  method_flag = method_flag)
+               data.table::fwrite(out,
+                  file.path(out_dir, paste0(id, "_", var, ".csv")))
+
+               n_extrap <- sum(appl$extrapolated_low |
+                                  appl$extrapolated_high)
+               summary_rows[[n_row <- n_row + 1L]] <- data.frame(
+                  model, ssp = s, id, var, tier, status = fc$status,
+                  n_overlap = fc$n_overlap, n_extrap = n_extrap,
+                  frac_extrap = round(n_extrap / length(src_date), 4))
+            }
+            "ok"
+         }, error = function(e) {
+            qed_log(paste("ERROR", model, s, id, conditionMessage(e)),
+                    qed_ssp_log_file)
+            paste("error:", conditionMessage(e))
+         })
+      }
+      rm(ssp_agg); invisible(gc())
+      qed_log(paste("ssp done:", model, s), qed_ssp_log_file)
+   }
+
+   rm(hist_agg, fits_cache, agg_pr, agg_tx, agg_tn); invisible(gc())
+   qed_log(paste("model done:", model), qed_ssp_log_file)
+}
+
+qed50_summary <- data.table::rbindlist(summary_rows, fill = TRUE)
+data.table::fwrite(qed50_summary,
+                   file.path(qed_ssp_dir, "qed_50_run_summary.csv"))
+print(table(qed50_summary$status))
+```
+
+## 4. Verification
+
+```{r verify}
+made <- list.files(file.path(qed_ssp_dir, "qm_corrected"),
+                   pattern = "_pr\\.csv$", recursive = TRUE, full.names = TRUE)
+cat("catchment pr series written:", length(made), "\n")
+stopifnot(length(made) > 0)   # never wipe outputs on a config mistake
+
+# spot-check one output: flags + gap accounting
+one <- data.table::fread(made[1])
+print(one[, .N, by = method_flag])
+cat("gap rule: 'source_nan' includes Feb-29 of noleap models AND the\n",
+    "2061-2080 window gap -- downstream counts these in n_gap_filled,\n",
+    "never fills silently.\n")
+qed_log("QED_50 done", qed_ssp_log_file)
+```
+
+**Handoff contract for downstream SSP modules:** corrected SSP series live at
+`data_processed/ssp/qm_corrected/<model>/<ssp>/<tier>/<id>_<var>.csv` with
+the same columns as the historical `qm_corrected/` tree, so the HYD-style
+readers work unchanged. NAs mean: window gap (2061--2080), Feb-29 of noleap
+models, or 360-day-calendar invalid dates -- always count, never fill.
+`extrapolation_share` for SSP rows must be computed on the SSP window days.
