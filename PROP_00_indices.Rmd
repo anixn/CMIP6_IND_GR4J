@@ -1,0 +1,225 @@
+---
+title: "PROP 00 -- Drought indices: observed SPI-12 / SRI-12 and the frozen observed propagation lags"
+subtitle: "Phase 3 of the low-flow framework (H3 / Objective 3) -- implements PROP_PRE_REGISTRATION.md (18 Nov 2026); parallel module"
+output:
+   html_document:
+      css: style_academic.css
+---
+
+```{r source-setup, include=FALSE}
+knitr::purl("HYD_00_setup.Rmd", file.path(tempdir(), "hyd00_setup.R"), documentation = 2)
+source(file.path(tempdir(), "hyd00_setup.R"))
+```
+
+# Notebook 00 -- Observed drought indices & the frozen propagation lags
+
+**What this notebook does.** Implements the OBSERVED leg of
+`PROP_PRE_REGISTRATION.md` (pre-registered 18 Nov 2026, before any model is
+compared):
+
+1. Per calibrated catchment: calendar-month totals of observed precipitation
+   (`P_mm`) and observed discharge (`Qobs_mm`, already in model space mm/day)
+   from `data_processed/hyd/model_inputs/<id>_obs.csv`. A month is valid iff
+   >= 80% of its days are present.
+2. 12-month rolling accumulations (window must be fully valid months),
+   standardized by gamma-MLE / normal-quantile transform (the convention
+   fixed in the pre-registration) -> **SPI-12** (precipitation) and
+   **SRI-12** (streamflow), both on the same 1981-2014 reference sample.
+3. **Propagation time** = lag L in {0..12} months maximizing the
+   cross-correlation between SPI-12 and SRI-12 lagged behind SPI (ties ->
+   smallest L). The Machhar-type SPI~SRI near-identity shortcut is forbidden;
+   `mean|SRI - SPI|` is computed only as the artefact diagnostic.
+4. **Freezes** `L_obs` per catchment into
+   `data_processed/prop/observed_lags.csv` BEFORE any model SRI is computed
+   (companion log records the freeze timestamp). Catchments failing the
+   pre-registered requirements are excluded with reason codes -- no silent
+   drops.
+
+**Model leg** (SPI-12 from corrected pr, SRI-12 from LOWFLOW_00 Qsim cache)
+is `PROP_10_lag.Rmd`, which runs only after this freeze.
+
+```{r log-file}
+prop_output_dir <- file.path(hyd_project_root, "data_processed", "prop")
+dir.create(prop_output_dir, recursive = TRUE, showWarnings = FALSE)
+prop_log_file <- file.path(prop_output_dir, "prop_00_log.txt")
+```
+
+## 1. Configuration (mirrors the pre-registration exactly)
+
+```{r config}
+prop_min_month_days  <- 0.8    # valid month: >= 80% of calendar days
+prop_min_months      <- 144    # >= 12 years of valid months for SPI/SRI
+prop_max_lag         <- 12L    # lags 0..12 months
+prop_min_overlap_cor <- 60     # minimum overlapping months for a lag's cor
+prop_test_mode       <- FALSE  # TRUE: 10 catchments
+```
+
+## 2. Roster
+
+```{r roster}
+calib <- data.table::fread(file.path(hyd_output_dir, "hyd_calib_summary.csv"),
+                           colClasses = list(character = "id"))
+roster <- calib[status == "calibrated"]
+if (prop_test_mode) roster <- roster[1:10]
+cat("Catchments for the observed leg:", nrow(roster), "\n")
+```
+
+## 3. Index functions
+
+```{r index-fns}
+# monthly totals with the >=80% valid-day rule (NA month otherwise)
+prop_monthly <- function(dt, col) {
+   dt[, ym := format(as.Date(date), "%Y-%m")]
+   dt[, n_cal := .N, by = ym]
+   dt[, n_ok := sum(!is.na(get(col))), by = ym]
+   agg <- dt[, .(tot = if (n_ok[1] >= prop_min_month_days * n_cal[1])
+                    sum(get(col), na.rm = TRUE) else NA_real_,
+                 n_cal = n_cal[1], n_ok = n_ok[1]), by = ym]
+   agg[, date := as.Date(paste0(ym, "-01"))]
+   agg[order(date)][, .(date, ym, tot, n_cal, n_ok)]
+}
+
+# 12-month rolling sum; NA unless all 12 months valid
+prop_acc12 <- function(x) data.table::frollsum(x, n = 12, na.rm = FALSE)
+
+# gamma-MLE standardization (pre-registered convention)
+prop_standardize <- function(x) {
+   x <- x[is.finite(x)]
+   if (length(x) < prop_min_months) return(list(ok = FALSE, reason = "insufficient_months"))
+   if (any(x <= 0))                 return(list(ok = FALSE, reason = "zero_accumulation"))
+   m <- mean(x); v <- stats::var(x)
+   if (!is.finite(v) || v <= 0)     return(list(ok = FALSE, reason = "degenerate_variance"))
+   fit <- tryCatch(
+      MASS::fitdistr(x, densfun = "gamma",
+                     start = list(shape = max(m^2 / v, 0.01),
+                                  scale = max(v / m, 1e-8))),
+      error = function(e) e)
+   if (inherits(fit, "error")) return(list(ok = FALSE, reason = "gamma_fit_failed"))
+   list(ok = TRUE, shape = fit$estimate[["shape"]],
+        scale = fit$estimate[["scale"]])
+}
+
+# SPI/SRI value from a fitted gamma + normal quantile transform
+prop_spi_value <- function(x, shape, scale) {
+   p <- stats::pgamma(x, shape = shape, scale = scale)
+   stats::qnorm(p)
+}
+
+# propagation lag: argmax cross-correlation, ties -> smallest lag
+prop_lag <- function(spi, sri) {
+   n <- length(spi)
+   cors <- rep(NA_real_, prop_max_lag + 1L)
+   for (L in 0:prop_max_lag) {
+      if (n - L < prop_min_overlap_cor) next
+      i1 <- seq_len(n - L); i2 <- seq.int(L + 1L, n)
+      ok <- is.finite(spi[i1]) & is.finite(sri[i2])
+      if (sum(ok) < prop_min_overlap_cor) next
+      cors[L + 1L] <- stats::cor(spi[i1][ok], sri[i2][ok])
+   }
+   L <- which.max(cors) - 1L        # which.max returns the FIRST max -> tie rule
+   list(L = as.integer(L), r = cors[L + 1L], cors = cors)
+}
+```
+
+## 4. Observed leg: compute, freeze, log
+
+```{r run-obs, eval=TRUE}
+lag_rows <- list(); excl <- list(); n_row <- 0L
+
+for (i in seq_len(nrow(roster))) {
+   id <- roster$id[i]
+   res <- tryCatch({
+      dt <- data.table::fread(file.path(hyd_inputs_dir, paste0(id, "_obs.csv")),
+                              select = c("date", "P_mm", "Qobs_mm"))
+
+      mp <- prop_monthly(dt, "P_mm")
+      mq <- prop_monthly(dt, "Qobs_mm")
+
+      std_p <- prop_standardize(prop_acc12(mp$tot))
+      std_q <- prop_standardize(prop_acc12(mq$tot))
+      if (!isTRUE(std_p$ok))
+         list(excl_reason = std_p$reason, what = "SPI")
+      else if (!isTRUE(std_q$ok))
+         list(excl_reason = std_q$reason, what = "SRI")
+      else {
+         # align on months where BOTH indices exist (window ends)
+         m <- merge(mp[, .(date, spi_in = prop_acc12(tot))],
+                    mq[, .(date, sri_in = prop_acc12(tot))], by = "date")
+         m <- m[!is.na(spi_in) & !is.na(sri_in)]
+         if (nrow(m) < prop_min_months)
+            list(excl_reason = "insufficient_months", what = "overlap")
+         else {
+            m[, spi := prop_spi_value(spi_in, std_p$shape, std_p$scale)]
+            m[, sri := prop_spi_value(sri_in, std_q$shape, std_q$scale)]
+
+            lg <- prop_lag(m$spi, m$sri)
+            if (is.na(lg$r))
+               list(excl_reason = "no_valid_lag", what = "lag")
+            else
+               data.table::data.table(
+                  catchment = id,
+                  L_obs = lg$L, corr_at_L = round(lg$r, 3),
+                  n_months = nrow(m),
+                  mean_abs_sri_spi = round(mean(abs(m$sri - m$spi)), 3),
+                  freeze_date = format(Sys.time(), "%Y-%m-%d"))
+         }
+      }
+   }, error = function(e) list(excl_reason = paste("error:", conditionMessage(e)),
+                               what = "unknown"))
+
+   if (!is.null(res$excl_reason)) {
+      excl[[length(excl) + 1L]] <- data.table::data.table(
+         module = "PROP_00", catchment = id, index = res$what,
+         reason_code = res$excl_reason, detail = NA_character_)
+   } else {
+      lag_rows[[n_row <- n_row + 1L]] <- res
+   }
+   if (i %% 25 == 0) cat("  ...", i, "of", nrow(roster), "\n")
+}
+
+observed_lags <- data.table::rbindlist(lag_rows, use.names = TRUE)
+data.table::setorder(observed_lags, catchment)
+data.table::fwrite(observed_lags,
+                   file.path(prop_output_dir, "observed_lags.csv"))
+
+excl_dt <- data.table::rbindlist(excl, use.names = TRUE, fill = TRUE)
+if (nrow(excl_dt)) {
+   data.table::fwrite(excl_dt,
+                      file.path(hyd_project_root, "data_processed", "logs",
+                                "PROP_00_exclusions.csv"))
+}
+cat("frozen observed lags:", nrow(observed_lags),
+    "| excluded:", nrow(excl_dt), "\n")
+```
+
+## 5. The freeze record + observed inter-catchment distribution
+
+```{r freeze}
+writeLines(
+   c(paste0("FREEZE: observed propagation lags frozen ",
+            format(Sys.time(), "%Y-%m-%d %H:%M:%S")),
+     paste0("roster attempted : ", nrow(roster)),
+     paste0("frozen           : ", nrow(observed_lags)),
+     paste0("excluded         : ", nrow(excl_dt),
+            " (data_processed/logs/PROP_00_exclusions.csv)"),
+     "rule: |L_model - L_obs| <= 1 month = reproduced (PROP_PRE_REGISTRATION.md sec 3)"),
+   prop_log_file)
+
+cat("Observed inter-catchment distribution of L_obs:\n")
+print(table(observed_lags$L_obs, useNA = "ifany"))
+cat("quantiles:", paste(round(stats::quantile(observed_lags$L_obs,
+                                             c(0, .25, .5, .75, 1),
+                                             na.rm = TRUE)), collapse = " "),
+    "\n")
+cat("artefact diagnostic mean|SRI-SPI|: median =",
+    round(stats::median(observed_lags$mean_abs_sri_spi), 3),
+    "(~0.013 would signal the Machhar-type model-structure artefact)\n")
+```
+
+## Take-away
+
+- `observed_lags.csv` is FROZEN -- `PROP_10_lag.Rmd` must not recompute or
+  retune it; the band `|L_model - L_obs| <= 1` applies to this frozen file.
+- The observed distribution of `L_obs` is the benchmark against which the
+  22 models' propagation skill is judged (H3; see `PROP_PRE_REGISTRATION.md`
+  section 4 for the decision rule).
