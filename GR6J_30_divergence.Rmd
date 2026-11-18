@@ -1,0 +1,292 @@
+---
+title: "GR6J 30 -- GR4J vs GR6J low-flow divergence (H2) on observed forcings"
+subtitle: "Phase 2 of the low-flow framework (H2 / Objective 2) -- divergence notebook"
+output:
+   html_document:
+      css: style_academic.css
+---
+
+```{r source-setup, include=FALSE}
+knitr::purl("GR6J_00_setup.Rmd", file.path(tempdir(), "gr6j00.R"), documentation = 2)
+source(file.path(tempdir(), "gr6j00.R"))
+knitr::purl("HYD_00_setup.Rmd", file.path(tempdir(), "hyd00_setup.R"), documentation = 2)
+source(file.path(tempdir(), "hyd00_setup.R"))
+```
+
+# Notebook 30 -- Structural divergence: GR6J vs GR4J low-flow metrics
+
+**What this notebook does (H2).** For every catchment calibrated under BOTH
+structures, runs GR4J and GR6J on the OBSERVED forcings (full window,
+warm-up 1981) and computes the five low-flow metrics (`metric_version = v1`,
+definitions identical to `LOWFLOW_00_metrics.Rmd`) on the out-of-sample
+evaluation window 2001-2014, once per structure. Then:
+
+1. **Divergence per metric**, `div = GR6J - GR4J`:
+   * `logNSE`: difference (dimensionless);
+   * the four % bias metrics: difference **in percentage points**
+     (NOT divided by GR4J -- these metrics are already relative, and dividing
+     by near-zero biases would explode; this deviation from the raw
+     `(GR6J-GR4J)/GR4J` formula is a deliberate, documented choice).
+2. **Stratification by aridity**: aridity index = PET_mm_yr / P_mm_yr from
+   the observed inputs; catchments split into terciles (wet / intermediate /
+   dry). The H2 hypothesis is that divergence is *structured by aridity and
+   storage*, so the verdict is per tercile, never pooled only.
+3. **Tests**: median divergence + paired Wilcoxon signed-rank per metric x
+   tercile; materiality per the thresholds **pre-registered in
+   `GR6J_00_setup.Rmd`** (logNSE >= 0.10; % bias metrics >= 10 pp).
+4. **H2 verdict file** (`h2_verdict.md`): H2 stands if at least one metric
+   diverges materially in at least one aridity tercile; fails if none does
+   anywhere. Negative results are reported as results. Direction (GR6J
+   better or worse) is REPORTED only -- no superiority claim (guardrail 3).
+
+The SSP-projection leg of H2 (14 GCMs x 4 SSPs) reuses this machinery later;
+this notebook is the observed-forcing divergence, the base case.
+
+```{r log-file}
+gr6j_log_file <- file.path(gr6j_output_dir, "gr6j_30_log.txt")
+```
+
+## 1. Metric functions (identical to LOWFLOW_00, metric_version v1)
+
+```{r metric-fns}
+metric_version   <- "v1"
+low_metrics_vec  <- c("logNSE", "q95_bias", "lf_volume_bias",
+                      "dry_spell_bias", "mam7_bias")
+low_eval_start   <- hyd_valid_start
+low_eval_end     <- hyd_valid_end
+low_min_eval_days <- 3068
+low_log_eps      <- 0.01
+low_q90_prob     <- 0.10
+low_q95_prob     <- 0.05
+low_spell_w      <- 7
+
+low_pairs <- function(dates, o, s) {
+   keep <- !is.na(o) & !is.na(s)
+   data.table::data.table(date = dates, o = o, s = s)[keep]
+}
+low_logNSE <- function(o, s) {
+   ol <- log10(o + low_log_eps); sl <- log10(s + low_log_eps)
+   if (length(ol) < 365 || stats::sd(ol) == 0) return(NA_real_)
+   1 - sum((sl - ol)^2) / sum((ol - mean(ol))^2)
+}
+low_q95_bias <- function(o, s) {
+   q95_o <- stats::quantile(o, probs = low_q95_prob, names = FALSE, type = 7)
+   if (!is.finite(q95_o) || q95_o <= 0) return(NA_real_)
+   q95_s <- stats::quantile(s, probs = low_q95_prob, names = FALSE, type = 7)
+   100 * (q95_s - q95_o) / q95_o
+}
+low_volume_bias <- function(pairs, q90_o) {
+   i_low <- pairs$o <= q90_o
+   vol_o <- sum(pairs$o[i_low]); vol_s <- sum(pairs$s[i_low])
+   if (vol_o <= 0) return(NA_real_)
+   100 * (vol_s - vol_o) / vol_o
+}
+low_dry_spell_bias <- function(pairs, q90_o) {
+   below_o <- pairs$o < q90_o; below_s <- pairs$s < q90_o
+   yr <- as.integer(format(pairs$date, "%Y"))
+   spell_year_max <- function(below, years) {
+      tapply(below, years, function(b) {
+         r <- rle(as.logical(b))
+         if (!any(r$values)) 0L else max(r$lengths[r$values])
+      })
+   }
+   mo <- mean(spell_year_max(below_o, yr)); ms <- mean(spell_year_max(below_s, yr))
+   if (!is.finite(mo) || mo <= 0) return(NA_real_)
+   100 * (ms - mo) / mo
+}
+low_mam7_bias <- function(pairs) {
+   yr <- as.integer(format(pairs$date, "%Y"))
+   roll_o <- data.table::frollmean(pairs$o, n = low_spell_w)
+   roll_s <- data.table::frollmean(pairs$s, n = low_spell_w)
+   mam7 <- function(roll, years) {
+      ym <- tapply(roll, years, min, na.rm = TRUE)
+      ym <- ym[is.finite(ym)]
+      if (!length(ym)) NA_real_ else mean(ym)
+   }
+   mo <- mam7(roll_o, yr); ms <- mam7(roll_s, yr)
+   if (!is.finite(mo) || mo <= 0) return(NA_real_)
+   100 * (ms - mo) / mo
+}
+low_metrics_of <- function(dates, o, s) {
+   pairs <- low_pairs(dates, o, s)
+   if (nrow(pairs) < low_min_eval_days) return(setNames(rep(NA_real_, 5),
+                                                        low_metrics_vec))
+   q90_o <- stats::quantile(pairs$o, probs = low_q90_prob, names = FALSE, type = 7)
+   setNames(c(
+      low_logNSE(pairs$o, pairs$s),
+      low_q95_bias(pairs$o, pairs$s),
+      low_volume_bias(pairs, q90_o),
+      low_dry_spell_bias(pairs, q90_o),
+      low_mam7_bias(pairs)), low_metrics_vec)
+}
+```
+
+## 2. Simulation core (observed forcing, both structures)
+
+```{r sim-fns}
+run_struct <- function(id, fun_mod, full_dates, i_warm, i_run_full, i_eval) {
+   dt <- data.table::fread(file.path(hyd_inputs_dir, paste0(id, "_obs.csv")))
+   prm_file <- if (identical(fun_mod, airGR::RunModel_GR4J))
+      file.path(hyd_output_dir, "params", paste0(id, ".rds"))
+      else file.path(gr6j_output_dir, "params", paste0(id, ".rds"))
+   prm <- readRDS(prm_file)
+
+   inputs <- airGR::CreateInputsModel(FUN_MOD = fun_mod,
+                                      DatesR = as.POSIXct(dt$date),
+                                      Precip = dt$P_mm, PotEvap = dt$PET_mm)
+   run_opt <- airGR::CreateRunOptions(FUN_MOD = fun_mod, InputsModel = inputs,
+                                      IndPeriod_WarmUp = i_warm,
+                                      IndPeriod_Run = i_run_full)
+   out <- airGR::RunModel(inputs, run_opt, Param = prm$param, FUN_MOD = fun_mod)
+   out$Qsim[i_eval - hyd_warmup_days]   # run-window indexing
+}
+```
+
+## 3. Roster: catchments calibrated under BOTH structures
+
+```{r roster}
+g4 <- data.table::fread(file.path(hyd_output_dir, "hyd_calib_summary.csv"),
+                        colClasses = list(character = "id"))[status == "calibrated"]
+g6 <- data.table::fread(file.path(gr6j_output_dir, "gr6j_calib_summary.csv"),
+                        colClasses = list(character = "id"))[status == "calibrated"]
+both <- intersect(g4$id, g6$id)
+cat("Catchments calibrated under BOTH structures:", length(both),
+    "(GR4J:", nrow(g4), "| GR6J:", nrow(g6), ")\n")
+if (gr6j_test_mode) both <- both[1:3]
+```
+
+## 4. Run + metric divergence per catchment
+
+```{r run, eval=TRUE}
+full_dates <- seq(hyd_period_start, hyd_period_end, by = "day")
+i_warm     <- seq(1L, hyd_warmup_days)
+i_run_full <- seq(1L, length(full_dates))[-i_warm]
+i_eval     <- which(full_dates >= low_eval_start & full_dates <= low_eval_end)
+eval_dates <- full_dates[i_eval]
+
+# aridity index per catchment (PET / P annual, from the observed inputs)
+arid_rows <- lapply(both, function(id) {
+   dt <- data.table::fread(file.path(hyd_inputs_dir, paste0(id, "_obs.csv")),
+                           select = c("P_mm", "PET_mm"))
+   data.table::data.table(
+      catchment = id,
+      aridity = sum(dt$PET_mm, na.rm = TRUE) / max(sum(dt$P_mm, na.rm = TRUE), 1))
+})
+arid <- data.table::rbindlist(arid_rows)
+arid[, arid_tercile := cut(aridity,
+                           breaks = stats::quantile(aridity, probs = c(0, 1/3, 2/3, 1),
+                                                    na.rm = TRUE),
+                           labels = c("wet", "intermediate", "dry"),
+                           include.lowest = TRUE)]
+
+series_dir <- file.path(gr6j_output_dir, "series")
+dir.create(series_dir, recursive = TRUE, showWarnings = FALSE)
+
+metric_rows <- list(); excl <- list()
+for (k in seq_along(both)) {
+   id <- both[k]
+   ok <- tryCatch({
+      q4 <- run_struct(id, airGR::RunModel_GR4J, full_dates, i_warm, i_run_full, i_eval)
+      q6 <- run_struct(id, airGR::RunModel_GR6J, full_dates, i_warm, i_run_full, i_eval)
+      obs <- data.table::fread(file.path(hyd_inputs_dir, paste0(id, "_obs.csv")),
+                               select = c("date", "Qobs_mm"))
+      o <- obs$Qobs_mm[i_eval]
+
+      m4 <- low_metrics_of(eval_dates, o, q4)
+      m6 <- low_metrics_of(eval_dates, o, q6)
+
+      saveRDS(list(dates = eval_dates, qobs = o, qsim_gr4j = q4,
+                   qsim_gr6j = q6),
+              file.path(series_dir, paste0(id, ".rds")))
+
+      metric_rows[[length(metric_rows) + 1L]] <- data.table::data.table(
+         catchment = id,
+         arid_tercile = arid[catchment == id, as.character(arid_tercile)],
+         structure = rep(c("GR4J", "GR6J"), each = 5),
+         period = paste(format(low_eval_start), format(low_eval_end), sep = "-"),
+         window = "valid", metric = rep(low_metrics_vec, 2),
+         value = round(c(m4, m6), 5), metric_version = metric_version)
+      "ok"
+   }, error = function(e) {
+      excl[[length(excl) + 1L]] <- data.table::data.table(
+         module = "GR6J_30", catchment = id, reason_code = "simulation_error",
+         detail = conditionMessage(e))
+      "error"
+   })
+   if (k %% 25 == 0) cat("  ...", k, "of", length(both), "\n")
+}
+
+struct_metrics <- data.table::rbindlist(metric_rows, use.names = TRUE)
+data.table::fwrite(struct_metrics,
+                   file.path(gr6j_output_dir, "struct_metrics.csv"))
+if (length(excl)) {
+   data.table::fwrite(data.table::rbindlist(excl, use.names = TRUE, fill = TRUE),
+                      file.path(hyd_project_root, "data_processed", "logs",
+                                "GR6J_30_exclusions.csv"))
+}
+cat("metric rows:", nrow(struct_metrics), "\n")
+```
+
+## 5. Divergence analysis + H2 verdict
+
+```{r divergence, eval=TRUE}
+wide_s <- data.table::dcast(struct_metrics[!is.na(value)],
+                            catchment + arid_tercile + metric ~ structure,
+                            value.var = "value")
+wide_s <- wide_s[!is.na(GR4J) & !is.na(GR6J)]
+# divergence: logNSE = difference; % bias metrics = difference in pp
+wide_s[metric == "logNSE", div := GR6J - GR4J]
+wide_s[metric != "logNSE", div := GR6J - GR4J]
+
+div_tab <- wide_s[, .(
+   n = .N,
+   median_div = round(stats::median(div), 3),
+   mad_div = round(stats::mad(div), 3),
+   wilcoxon_p = suppressWarnings(
+      round(stats::wilcox.test(GR6J, GR4J, paired = TRUE)$p.value, 4))
+), by = .(metric, arid_tercile)]
+data.table::fwrite(div_tab, file.path(gr6j_output_dir, "divergence_table.csv"))
+
+# materiality (pre-registered in GR6J_00_setup.Rmd)
+div_tab[, material := (metric == "logNSE" & abs(median_div) >= 0.10) |
+                      (metric != "logNSE" & abs(median_div) >= 10)]
+h2_stands <- any(div_tab$material)
+
+writeLines(c(
+   "# H2 verdict -- GR4J vs GR6J low-flow divergence (observed forcings)",
+   "",
+   paste0("**Date:** ", format(Sys.time()),
+          " | metric_version ", metric_version,
+          " | catchments: ", data.table::uniqueN(wide_s$catchment)),
+   "",
+   paste0("**Rule (pre-registered 18 Nov 2026, GR6J_00_setup.Rmd):** ",
+          "material divergence = median |div| >= 0.10 (logNSE) or >= 10 pp ",
+          "(% bias metrics). H2 stands if >= 1 metric diverges materially ",
+          "in >= 1 aridity tercile; fails otherwise (negative result)."),
+   "",
+   paste0("**Verdict: ", if (h2_stands) "H2 STANDS" else "H2 FAILS", "**"),
+   "",
+   "Material divergences by tercile:",
+   "",
+   knitr::kable(div_tab[material == TRUE,
+                        .(metric, arid_tercile, n, median_div, wilcoxon_p)]),
+   "",
+   "Direction is reported, never claimed as superiority (guardrail 3): ",
+   "positive div = GR6J larger (for biases: worse overestimation; for ",
+   "logNSE: better skill). See divergence_table.csv for the full grid.",
+   "",
+   "NOTE: this is the observed-forcing divergence (base case of H2); the ",
+   "SSP-projection leg (14 GCMs x 4 SSPs) extends it in the projection phase."),
+   file.path(gr6j_output_dir, "h2_verdict.md"))
+
+print(div_tab[order(metric, arid_tercile)])
+```
+
+## Take-away
+
+- `struct_metrics.csv` (long) + `divergence_table.csv` + `h2_verdict.md`.
+- Series cache under `data_processed/gr6j/series/` (obs forcing, both
+  structures) for reuse by later modules (DECOMP, SSP legs).
+- The paper reports divergence structured by aridity -- the "GR6J is the
+  low-flow model" folklore is NOT assumed; if GR4J matches observed low
+  flows better in dry terciles, that is the finding.
