@@ -1,0 +1,386 @@
+---
+title: "LOWFLOW 00 -- Low-flow metric layer for CMIP-driven discharge (2001-2014, 22 models x calibrated catchments)"
+subtitle: "Phase 1 of the low-flow framework (H1 / Objective 1) -- parallel module, no edits to existing notebooks"
+output:
+   html_document:
+      css: style_academic.css
+---
+
+```{r source-setup, include=FALSE}
+knitr::purl("HYD_00_setup.Rmd", file.path(tempdir(), "hyd00_setup.R"), documentation = 2)
+source(file.path(tempdir(), "hyd00_setup.R"))
+```
+
+# Notebook 00 -- Low-flow metric layer
+
+**What this notebook does.** HYD_30 ranked the 22 bias-corrected CMIP6
+models on *whole-flow* daily skill (KGE/NSE/PBIAS). This module re-simulates
+the same calibrated GR4J runs (identical params, forcings, warm-up, windows --
+the daily series were regenerated rather than committed, per repo convention)
+and computes a **low-flow-specific metric suite** on the out-of-sample
+evaluation window 2001-2014, which HYD_30 never computed:
+
+| metric | definition (pre-registered 18 Nov 2026, `metric_version = "v1"`) |
+|---|---|
+| `logNSE` | NSE on log10(Q + eps), eps = 0.01 mm/day; NA if <365 paired days or zero variance of log-obs |
+| `q95_bias` | % bias of the simulated low-flow index Q95 (flow exceeded 95% of time = 5th percentile of daily values, quantile type 7, paired non-NA days); NA if observed Q95 <= 0 (ephemeral) |
+| `lf_volume_bias` | % bias of total simulated volume on days where observed flow <= observed Q90 threshold (10th percentile), paired days; the low-flow "deficit volume" proxy |
+| `dry_spell_bias` | % bias of the mean annual maximum spell of consecutive days below the observed Q90 threshold (an NA day ends a spell); NA if the observed mean spell length is 0 |
+| `mam7_bias` | % bias of the mean annual 7-day rolling-minimum flow (MAM7, trailing 7-day mean, window must be fully paired) |
+
+**Conventions enforced here (AGENTS.md):**
+
+* every output row carries `model`, `catchment`, `period`, `window`, `metric`,
+  `value`, `n_eval_days`, `n_gap_filled`, `extrapolation_share`,
+  `metric_version` and a `metric_note` reason code wherever a metric's guard
+  fired -- flags propagate, never drop silently;
+* catchments/models that fail a metric's guard produce a row in
+  `data_processed/logs/LOWFLOW_00_exclusions.csv` with a `reason_code`;
+* the pairwise Spearman correlation table between metrics is written so the
+  rank-compositing module (`LOWFLOW_10`) can de-duplicate near-duplicates
+  (rho > 0.9) **before** averaging -- no metric averaging without inspection;
+* daily eval-window series (obs + all models) are cached per catchment under
+  `data_processed/lowflow/series/` so later modules (ranks, propagation,
+  GR6J divergence) never re-run the 4,000+ GR4J simulations.
+
+```{r log-file}
+low_output_dir <- file.path(hyd_project_root, "data_processed", "lowflow")
+dir.create(low_output_dir, recursive = TRUE, showWarnings = FALSE)
+dir.create(file.path(hyd_project_root, "data_processed", "logs"),
+           recursive = TRUE, showWarnings = FALSE)
+low_log_file <- file.path(low_output_dir, "lowflow_00_log.txt")
+```
+
+## 1. Configuration
+
+```{r config}
+metric_version   <- "v1"
+low_metrics_vec  <- c("logNSE", "q95_bias", "lf_volume_bias",
+                      "dry_spell_bias", "mam7_bias")
+low_eval_start   <- hyd_valid_start          # 2001-01-01
+low_eval_end     <- hyd_valid_end            # 2014-12-31
+low_min_eval_days <- 3068                    # 60% of the 5,114-day window
+low_log_eps      <- 0.01                     # mm/day, logNSE offset
+low_q90_prob     <- 0.10                     # exceedance 90% -> 10th pct
+low_q95_prob     <- 0.05                     # exceedance 95% -> 5th pct
+low_spell_w      <- 7                        # MAM7 window width (days)
+low_test_mode    <- FALSE                    # TRUE: 2 catchments x 2 models
+low_save_series  <- TRUE                     # cache eval series as .rds
+```
+
+## 2. Roster (identical to HYD_30: calibrated + parameters on disk)
+
+```{r roster}
+calib <- data.table::fread(file.path(hyd_output_dir, "hyd_calib_summary.csv"),
+                           colClasses = list(character = "id"))
+roster <- calib[status == "calibrated"]
+
+inv <- data.table::fread(file.path(hyd_qed_dir, "inventory.csv"),
+                         colClasses = list(character = "id"))
+roster <- merge(roster, inv[, .(id, tier = final_action)], by = "id", all.x = TRUE)
+
+params_dir <- file.path(hyd_output_dir, "params")
+roster <- roster[file.exists(file.path(params_dir, paste0(id, ".rds")))]
+
+topo <- data.table::fread(hyd_topo_fp, colClasses = list(character = "gauge_id"))
+topo[, id := hyd_normalize_id(gauge_id)]
+roster <- merge(roster, topo[, .(id, cwc_lat)], by = "id", all.x = TRUE)
+
+if (low_test_mode) roster <- roster[id %in% c("03002", "03005")]
+cat("Catchments to simulate:", nrow(roster), "\n")
+```
+
+## 3. Models (all 22 with corrected series -- low-flow ranking re-tests H1)
+
+```{r models}
+ranking <- data.table::fread(file.path(hyd_qed_dir, "model_ranking_overall.csv"))
+models <- ranking$model[sapply(ranking$model, function(m) {
+   dir.exists(file.path(hyd_qm_corr_dir, m))
+})]
+if (low_test_mode) models <- models[1:2]
+cat("Models with corrected series:", length(models), "\n")
+```
+
+## 4. Metric functions (guarded; every guard returns NA + a reason code)
+
+```{r metric-fns}
+# paired eval table: date, o = observed, s = simulated, both masked to pairs
+low_pairs <- function(dates, o, s) {
+   keep <- !is.na(o) & !is.na(s)
+   data.table::data.table(date = dates, o = o, s = s)[keep]
+}
+
+# --- logNSE -----------------------------------------------------------------
+low_logNSE <- function(o, s) {
+   ol <- log10(o + low_log_eps); sl <- log10(s + low_log_eps)
+   if (length(ol) < 365 || stats::sd(ol) == 0) return(NA_real_)
+   1 - sum((sl - ol)^2) / sum((ol - mean(ol))^2)
+}
+
+# --- Q95 low-flow index bias (5th percentile of paired daily values) ---------
+low_q95_bias <- function(o, s) {
+   q95_o <- stats::quantile(o, probs = low_q95_prob, names = FALSE, type = 7)
+   if (!is.finite(q95_o) || q95_o <= 0) return(NA_real_)
+   q95_s <- stats::quantile(s, probs = low_q95_prob, names = FALSE, type = 7)
+   100 * (q95_s - q95_o) / q95_o
+}
+
+# --- low-flow volume bias (days where obs <= observed Q90) -------------------
+low_volume_bias <- function(pairs, q90_o) {
+   i_low <- pairs$o <= q90_o
+   vol_o <- sum(pairs$o[i_low]); vol_s <- sum(pairs$s[i_low])
+   if (vol_o <= 0) return(NA_real_)
+   100 * (vol_s - vol_o) / vol_o
+}
+
+# --- dry-spell bias (mean annual max run below observed Q90) -----------------
+low_dry_spell_bias <- function(pairs, q90_o) {
+   below_o <- pairs$o < q90_o; below_s <- pairs$s < q90_o   # NA ends a spell
+   yr <- as.integer(format(pairs$date, "%Y"))
+   spell_year_max <- function(below, years) {
+      tapply(below, years, function(b) {
+         r <- rle(as.logical(b))
+         if (!any(r$values)) 0L else max(r$lengths[r$values])
+      })
+   }
+   so <- spell_year_max(below_o, yr); ss <- spell_year_max(below_s, yr)
+   mo <- mean(so); ms <- mean(ss)
+   if (!is.finite(mo) || mo <= 0) return(NA_real_)
+   100 * (ms - mo) / mo
+}
+
+# --- MAM7 bias (mean annual minimum of trailing 7-day mean flow) -------------
+low_mam7_bias <- function(pairs) {
+   yr <- as.integer(format(pairs$date, "%Y"))
+   roll_o <- data.table::frollmean(pairs$o, n = low_spell_w)  # NA inside runs
+   roll_s <- data.table::frollmean(pairs$s, n = low_spell_w)
+   # annual minimum of the rolling mean; years with no complete 7-day run
+   # contribute nothing (min(na.rm=TRUE) on an all-NA year gives Inf -- drop it)
+   mam7 <- function(roll, years) {
+      ym <- tapply(roll, years, min, na.rm = TRUE)
+      ym <- ym[is.finite(ym)]
+      if (!length(ym)) NA_real_ else mean(ym)
+   }
+   mo <- mam7(roll_o, yr); ms <- mam7(roll_s, yr)
+   if (!is.finite(mo) || mo <= 0) return(NA_real_)
+   100 * (ms - mo) / mo
+}
+```
+
+## 5. Simulation core (identical to HYD_30, plus daily series retention)
+
+```{r sim-fns}
+zoo_gapfill <- function(x) {
+   i_na <- which(is.na(x))
+   if (length(i_na) == 0) return(x)
+   x[i_na] <- stats::approx(seq_along(x), x, xout = i_na, rule = 2)$y
+   x
+}
+
+hyd_read_corrected <- function(model, tier, id, var) {
+   dt <- data.table::fread(file.path(hyd_qm_corr_dir, model, tier,
+                                     paste0(id, "_", var, ".csv")),
+                           select = c("date", "corrected_value", "method_flag"))
+   data.table::setnames(dt, "corrected_value", var)
+   data.table::setnames(dt, "method_flag", paste0("flag_", var))
+   dt
+}
+
+# runs GR4J for one catchment x model; returns list(qobs, qsim, dates, flags)
+low_simulate <- function(id, tier, lat, model, full_dates, i_warm, i_run_full,
+                         i_eval) {
+   obs <- data.table::fread(file.path(hyd_inputs_dir, paste0(id, "_obs.csv")),
+                            select = c("date", "Qobs_mm"))
+   prm <- readRDS(file.path(params_dir, paste0(id, ".rds")))
+
+   pc <- hyd_read_corrected(model, tier, id, "pr")
+   tx <- hyd_read_corrected(model, tier, id, "tasmax")
+   tn <- hyd_read_corrected(model, tier, id, "tasmin")
+   dt <- Reduce(function(x, y) merge(x, y, by = "date", all = TRUE),
+                list(pc, tx, tn))
+   dt <- merge(obs, dt, by = "date", all.x = TRUE)
+   dt <- dt[order(as.Date(date))]
+   dt[, Tmean_C := (tasmax + tasmin) / 2]
+
+   # noleap Feb-29 gaps: pr -> 0, T -> interpolated, count kept (never silent)
+   n_gap <- sum(is.na(dt$Tmean_C))
+   if (n_gap > 0) {
+      dt[, Tmean_C := zoo_gapfill(Tmean_C)]
+      dt[, tasmax := zoo_gapfill(tasmax)]
+      dt[, tasmin := zoo_gapfill(tasmin)]
+      dt[is.na(pr), pr := 0]
+      if (sum(is.na(dt$Tmean_C)) > 0) stop("unfillable input gaps (n=", n_gap, ")")
+   }
+   dt[, PET_mm := airGR::PE_Oudin(JD = as.integer(format(as.Date(date), "%j")),
+                                  Temp = Tmean_C, Lat = lat, LatUnit = "deg")]
+
+   inputs <- airGR::CreateInputsModel(FUN_MOD = airGR::RunModel_GR4J,
+                                      DatesR = as.POSIXct(as.Date(dt$date)),
+                                      Precip = dt$pr, PotEvap = dt$PET_mm)
+   run_opt <- airGR::CreateRunOptions(FUN_MOD = airGR::RunModel_GR4J,
+                                      InputsModel = inputs,
+                                      IndPeriod_WarmUp = i_warm,
+                                      IndPeriod_Run = i_run_full)
+   out <- airGR::RunModel(inputs, run_opt, Param = prm$param,
+                          FUN_MOD = airGR::RunModel_GR4J)
+
+   i_eval_dt <- match(full_dates[i_eval], dt$date)
+   list(qobs = dt$Qobs_mm[i_eval_dt],
+        # Qsim is indexed within the run window (starts after warm-up)
+        qsim = out$Qsim[i_eval - hyd_warmup_days],
+        n_gap_filled = n_gap,
+        extrap_eval = sum(c(dt$flag_pr[i_eval_dt], dt$flag_tasmax[i_eval_dt],
+                            dt$flag_tasmin[i_eval_dt]) != "within_range",
+                          na.rm = TRUE))
+}
+```
+
+## 6. Metric driver (one catchment x one model -> long-format rows)
+
+```{r driver}
+# reason code for a metric that lands NA despite enough paired days
+low_na_reason <- function(metric, pairs, q90_o) {
+   switch(metric,
+      "logNSE"         = "log_zero_variance",
+      "q95_bias"       = if (q90_o <= 0 || min(pairs$o) <= 0) "ephemeral_threshold_zero"
+                         else "q95_guard",
+      "lf_volume_bias" = "no_days_below_q90",
+      "dry_spell_bias" = "no_obs_dry_spell",
+      "mam7_bias"      = "mam7_degenerate",
+      "metric_guard")
+}
+
+low_metric_rows <- function(id, model, dates, o, s, n_gap, n_extrap) {
+   pairs <- low_pairs(dates, o, s)
+   n_eval <- nrow(pairs)
+   extrap_share <- n_extrap / max(n_eval, 1L)
+
+   base <- data.table::data.table(
+      model = model, catchment = id,
+      period = paste(format(low_eval_start), format(low_eval_end), sep = "-"),
+      window = "valid",
+      metric = low_metrics_vec, value = NA_real_,
+      n_eval_days = n_eval, n_gap_filled = n_gap,
+      extrapolation_share = round(extrap_share, 6),
+      metric_version = metric_version, metric_note = NA_character_)
+
+   if (n_eval < low_min_eval_days) {
+      base[, metric_note := "insufficient_eval_days"]
+      return(list(rows = base, excluded = TRUE))
+   }
+
+   q90_o <- stats::quantile(pairs$o, probs = low_q90_prob,
+                            names = FALSE, type = 7)
+   vals <- c(
+      logNSE         = low_logNSE(pairs$o, pairs$s),
+      q95_bias       = low_q95_bias(pairs$o, pairs$s),
+      lf_volume_bias = low_volume_bias(pairs, q90_o),
+      dry_spell_bias = low_dry_spell_bias(pairs, q90_o),
+      mam7_bias      = low_mam7_bias(pairs))
+
+   base[, value := round(as.numeric(vals), 5)]
+   base[is.na(value), metric_note :=
+           low_na_reason(metric, pairs, q90_o)]
+   list(rows = base, excluded = FALSE)
+}
+```
+
+## 7. Run: catchments x models
+
+```{r run, eval=TRUE}
+full_dates <- seq(hyd_period_start, hyd_period_end, by = "day")
+i_warm     <- seq(1L, hyd_warmup_days)
+i_run_full <- seq(1L, length(full_dates))[-i_warm]
+i_eval     <- which(full_dates >= low_eval_start & full_dates <= low_eval_end)
+eval_dates <- full_dates[i_eval]
+
+series_dir <- file.path(low_output_dir, "series")
+if (low_save_series) dir.create(series_dir, recursive = TRUE, showWarnings = FALSE)
+
+rows <- list(); excl <- list(); n_row <- 0L
+
+for (i in seq_len(nrow(roster))) {
+   id <- roster$id[i]; tier <- roster$tier[i]; lat <- roster$cwc_lat[i]
+   res_by_model <- list(); ok_models <- character(0)
+
+   for (m in models) {
+      sim <- tryCatch(
+         low_simulate(id, tier, lat, m, full_dates, i_warm, i_run_full, i_eval),
+         error = function(e) {
+            excl[[length(excl) + 1L]] <- data.table::data.table(
+               module = "LOWFLOW_00", catchment = id, model = m,
+               reason_code = "simulation_error",
+               detail = conditionMessage(e))
+            NULL
+         })
+      if (is.null(sim)) next
+      res_by_model[[m]] <- sim
+      ok_models <- c(ok_models, m)
+      mr <- low_metric_rows(id, m, eval_dates, sim$qobs, sim$qsim,
+                            sim$n_gap_filled, sim$extrap_eval)
+      rows[[n_row <- n_row + 1L]] <- mr$rows
+      if (mr$excluded) {
+         excl[[length(excl) + 1L]] <- data.table::data.table(
+            module = "LOWFLOW_00", catchment = id, model = m,
+            reason_code = "insufficient_eval_days",
+            detail = paste0("n_eval_days=", mr$rows$n_eval_days[1]))
+      }
+   }
+
+   if (low_save_series && length(ok_models)) {
+      saveRDS(list(dates = eval_dates,
+                   qobs  = res_by_model[[1]]$qobs,      # obs is model-independent
+                   qsim  = do.call(cbind,
+                                   lapply(res_by_model, `[[`, "qsim")),
+                   models = ok_models),
+              file.path(series_dir, paste0(id, ".rds")))
+   }
+   cat("done:", id, "|", length(ok_models), "models\n")
+}
+
+low_metrics_long <- data.table::rbindlist(rows, use.names = TRUE)
+data.table::fwrite(low_metrics_long,
+                   file.path(low_output_dir, "lowflow_metrics.csv"))
+
+excl_dt <- data.table::rbindlist(excl, use.names = TRUE, fill = TRUE)
+if (nrow(excl_dt)) {
+   data.table::fwrite(excl_dt,
+                      file.path(hyd_project_root, "data_processed", "logs",
+                                "LOWFLOW_00_exclusions.csv"))
+   cat("Exclusions logged:", nrow(excl_dt), "\n")
+}
+cat("metric rows:", nrow(low_metrics_long), "\n")
+```
+
+## 8. Wide view + metric pairwise correlations (guardrail 5 inspection)
+
+```{r inspect}
+low_metrics_wide <- data.table::dcast(
+   low_metrics_long, model + catchment + period + window + n_eval_days +
+      n_gap_filled + extrapolation_share + metric_version + metric_note ~ metric,
+   value.var = "value")
+data.table::fwrite(low_metrics_wide,
+                   file.path(low_output_dir, "lowflow_metrics_wide.csv"))
+
+# Spearman rho between metrics across all model x catchment rows
+# (evidence base for the LOWFLOW_10 de-duplication decision; rho > 0.9 pairs
+#  must NOT both enter a composite rank)
+rho_tab <- cor(low_metrics_wide[, low_metrics_vec, with = FALSE],
+               method = "spearman", use = "pairwise.complete.obs")
+rho_dt <- data.table::data.table(
+   metric1 = rep(rownames(rho_tab), ncol(rho_tab)),
+   metric2 = rep(colnames(rho_tab), each = nrow(rho_tab)),
+   rho = round(as.vector(rho_tab), 3))
+data.table::fwrite(rho_dt,
+                   file.path(low_output_dir, "metric_pairwise_rho.csv"))
+print(round(rho_tab, 3))
+```
+
+## Take-away
+
+- `lowflow_metrics.csv` (long) + `lowflow_metrics_wide.csv` + the daily series
+  cache under `series/` are the inputs of `LOWFLOW_10_ranks.Rmd`, which builds
+  the low-flow-aware model ranking after the rho > 0.9 de-duplication check
+  and tests **H1** (forcing rank vs low-flow rank; fails if pooled rho > 0.6).
+- Every dropped catchment/metric is in `LOWFLOW_00_exclusions.csv` with a
+  reason code; `extrapolation_share` and `n_gap_filled` travel with every row.
