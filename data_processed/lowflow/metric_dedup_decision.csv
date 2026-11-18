@@ -1,0 +1,2 @@
+module,metric_pair,abs_rho,dropped,kept,reason,decided_on
+LOWFLOW_10,mam7_bias~q95_bias,0.937,q95_bias,logNSE+lf_volume_bias+dry_spell_bias+mam7_bias,pairwise_rho_above_0.9,2026-11-18

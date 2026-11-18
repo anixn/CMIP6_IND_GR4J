@@ -197,7 +197,8 @@ boot <- vapply(seq_len(low_n_boot), function(b) {
                       .(model, r = mean(lowflow_rank_mean)), by = model]
    agg  <- sub[, .(rr = mean(r)), by = model]
    mrg  <- merge(qed_rank[, .(model, forcing_rank)],
-                 agg[, .(model, lowflow_rank = frank(rr))], by = "model")
+                 agg[, .(model, lowflow_rank = data.table::frank(rr))],
+                 by = "model")
    if (nrow(mrg) < 10) return(NA_real_)
    suppressWarnings(stats::cor(mrg$forcing_rank, mrg$lowflow_rank,
                                method = "spearman"))
