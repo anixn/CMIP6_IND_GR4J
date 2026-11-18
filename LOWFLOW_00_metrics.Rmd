@@ -242,7 +242,7 @@ low_simulate <- function(id, tier, lat, model, full_dates, i_warm, i_run_full,
 # (vectorized over the metric column; q90_o / pairs from the caller scope)
 low_na_reason_vec <- function(metric, pairs, q90_o) {
    ephemeral <- (q90_o <= 0 || min(pairs$o) <= 0)
-   fcase(
+   data.table::fcase(
       metric == "logNSE",         "log_zero_variance",
       metric == "q95_bias",       if (ephemeral) "ephemeral_threshold_zero"
                                   else "q95_guard",
