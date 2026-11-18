@@ -1,0 +1,163 @@
+---
+title: "GR6J 20 -- GR6J calibration & validation on observed data (identical treatment to GR4J)"
+subtitle: "Phase 2 of the low-flow framework (H2 / Objective 2) -- calibration notebook"
+output:
+   html_document:
+      css: style_academic.css
+---
+
+```{r source-setup, include=FALSE}
+knitr::purl("GR6J_00_setup.Rmd", file.path(tempdir(), "gr6j00.R"), documentation = 2)
+source(file.path(tempdir(), "gr6j00.R"))
+knitr::purl("HYD_00_setup.Rmd", file.path(tempdir(), "hyd00_setup.R"), documentation = 2)
+source(file.path(tempdir(), "hyd00_setup.R"))
+```
+
+# Notebook 20 -- Calibrate GR6J per catchment
+
+**What this notebook does.** The exact GR4J calibration recipe of HYD_20,
+with `RunModel_GR6J` swapped in -- same inputs (`model_inputs/<id>_obs.csv`),
+same windows (warm-up 1981, calibrate 1982-2000, validate 2001-2014),
+same optimizer (`Calibration_Michel`), same objective (KGE in mm/day), same
+screening (< 3,650 valid Q-days in the calibration window -> skipped and
+logged). Identical-treatment rule; the only difference is the structure.
+
+Outputs: `data_processed/gr6j/params/<id>.rds` (6 parameters) and
+`gr6j_calib_summary.csv` (diagnostics + the same columns as GR4J for direct
+comparison).
+
+```{r log-file}
+gr6j_log_file <- file.path(gr6j_output_dir, "gr6j_20_log.txt")
+```
+
+## 1. Roster (same prepared inputs as GR4J)
+
+```{r roster}
+roster <- data.table::fread(file.path(hyd_output_dir, "hyd_inputs_summary.csv"),
+                            colClasses = list(character = "id"))
+if (gr6j_test_mode) roster <- roster[id %in% gr6j_test_ids]
+cat("Catchments to calibrate (GR6J):", nrow(roster), "\n")
+```
+
+## 2. Calibrate + validate
+
+```{r calibrate, eval=TRUE}
+idx <- function(d) which(full_dates >= d & full_dates <= d)
+full_dates <- seq(hyd_period_start, hyd_period_end, by = "day")
+
+i_warm     <- seq(1L, hyd_warmup_days)
+i_run_cal  <- seq(1L, idx(hyd_calib_end))[-i_warm]
+i_run_full <- seq(1L, idx(hyd_period_end))[-i_warm]
+i_val      <- idx(hyd_valid_start):idx(hyd_valid_end)
+
+calib_opts <- airGR::CreateCalibOptions(FUN_MOD = airGR::RunModel_GR6J)
+
+kge_calc <- function(o, s) {
+   keep <- !is.na(o) & !is.na(s)
+   o <- o[keep]; s <- s[keep]
+   if (length(o) < 365 || sd(o) == 0) return(NA_real_)
+   r <- cor(o, s); a <- sd(s) / sd(o); b <- mean(s) / mean(o)
+   1 - sqrt((r - 1)^2 + (a - 1)^2 + (b - 1)^2)
+}
+nse_calc <- function(o, s) {
+   keep <- !is.na(o) & !is.na(s); o <- o[keep]; s <- s[keep]
+   1 - sum((s - o)^2) / sum((o - mean(o))^2)
+}
+pbias_calc <- function(o, s) {
+   keep <- !is.na(o) & !is.na(s)
+   100 * (sum(s[keep] - o[keep]) / sum(o[keep]))
+}
+
+calib_rows <- list(); n_row <- 0L
+
+for (i in seq_len(nrow(roster))) {
+   id <- roster$id[i]
+   res <- tryCatch({
+      dt <- data.table::fread(file.path(hyd_inputs_dir, paste0(id, "_obs.csv")))
+
+      # identical screening to HYD_20
+      if (sum(!is.na(dt$Qobs_mm[i_run_cal])) < 3650) {
+         calib_rows[[n_row <- n_row + 1L]] <- data.frame(
+            id, status = "skipped_less_than_3650_valid_Q_in_calib")
+         next
+      }
+
+      inputs <- airGR::CreateInputsModel(
+         FUN_MOD = airGR::RunModel_GR6J,
+         DatesR  = as.POSIXct(dt$date),
+         Precip  = dt$P_mm,
+         PotEvap = dt$PET_mm)
+
+      run_opt_calib <- airGR::CreateRunOptions(
+         FUN_MOD          = airGR::RunModel_GR6J,
+         InputsModel      = inputs,
+         IndPeriod_WarmUp = i_warm,
+         IndPeriod_Run    = i_run_cal)
+
+      crit_calib <- airGR::CreateInputsCrit(
+         FUN_CRIT     = airGR::ErrorCrit_KGE,
+         InputsModel  = inputs,
+         RunOptions   = run_opt_calib,
+         VarObs       = "Q",
+         Obs          = dt$Qobs_mm[i_run_cal])
+
+      cal <- airGR::Calibration_Michel(inputs, run_opt_calib, crit_calib,
+                                       calib_opts,
+                                       FUN_MOD = airGR::RunModel_GR6J,
+                                       FUN_CRIT = airGR::ErrorCrit_KGE)
+
+      run_opt_full <- airGR::CreateRunOptions(
+         FUN_MOD          = airGR::RunModel_GR6J,
+         InputsModel      = inputs,
+         IndPeriod_WarmUp = i_warm,
+         IndPeriod_Run    = i_run_full)
+
+      outputs <- airGR::RunModel(inputs, run_opt_full,
+                                 Param = cal$ParamFinalR,
+                                 FUN_MOD = airGR::RunModel_GR6J)
+
+      sim_mm <- outputs$Qsim
+      o_cal <- dt$Qobs_mm[i_run_cal]; s_cal <- sim_mm[i_run_cal - hyd_warmup_days]
+      o_val <- dt$Qobs_mm[i_val];     s_val <- sim_mm[i_val - hyd_warmup_days]
+
+      calib_rows[[n_row <- n_row + 1L]] <- data.frame(
+         id, status = "calibrated",
+         kge_calib = round(kge_calc(o_cal, s_cal), 3),
+         nse_calib = round(nse_calc(o_cal, s_cal), 3),
+         kge_valid = round(kge_calc(o_val, s_val), 3),
+         nse_valid = round(nse_calc(o_val, s_val), 3),
+         pbias_valid = round(pbias_calc(o_val, s_val), 2),
+         param_x1 = round(cal$ParamFinalR[1], 1),
+         param_x2 = round(cal$ParamFinalR[2], 1),
+         param_x3 = round(cal$ParamFinalR[3], 2),
+         param_x4 = round(cal$ParamFinalR[4], 3),
+         param_x5 = round(cal$ParamFinalR[5], 3),
+         param_x6 = round(cal$ParamFinalR[6], 2))
+      saveRDS(list(id = id, param = cal$ParamFinalR,
+                   area_km2 = roster$area_km2[i]),
+              file.path(gr6j_output_dir, "params", paste0(id, ".rds")))
+      "ok"
+   }, error = function(e) {
+      gr6j_log(paste("ERROR", id, conditionMessage(e)), gr6j_log_file)
+      paste("error:", conditionMessage(e))
+   })
+}
+
+gr6j_calib_summary <- data.table::rbindlist(calib_rows, fill = TRUE)
+data.table::fwrite(gr6j_calib_summary,
+                   file.path(gr6j_output_dir, "gr6j_calib_summary.csv"))
+print(table(gr6j_calib_summary$status))
+print(summary(gr6j_calib_summary$kge_valid))
+gr6j_log(paste0("GR6J_20 done: ",
+                sum(gr6j_calib_summary$status == "calibrated", na.rm = TRUE),
+                " calibrated"), gr6j_log_file)
+```
+
+## 3. Interpretation guide
+
+- Compare directly against `hyd_calib_summary.csv` (GR4J): the two tables
+  share columns by construction. The interesting comparison for H2 is NOT
+  which KGE is higher -- it is the low-flow metric divergence computed in
+  `GR6J_30_divergence.Rmd` on the simulated series.
+- GR6J extra parameters: X5 (exponential-store exchange coefficient) and
+  X6 (exponential-store capacity) -- where GR6J's low-flow behaviour lives.

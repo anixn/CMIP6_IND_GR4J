@@ -1,0 +1,69 @@
+---
+title: "GR6J 00 -- Setup: configuration for the GR6J structural axis"
+subtitle: "Phase 2 of the low-flow framework (H2 / Objective 2) -- setup notebook (sourced by 20/30)"
+output:
+   html_document:
+      css: style_academic.css
+---
+
+# Notebook 0 -- GR6J configuration
+
+**Why GR6J.** GR6J (Pushpalatha et al. 2011) adds an exponential-store
+exchange branch designed for low flows -- exactly the structural hypothesis
+H2 asks about: *do GR4J and GR6J low-flow projections differ materially,
+stratified by aridity/storage?* The guardrail (AGENTS.md, fixed): **divergence
+is the signal, never a beauty contest** -- published evidence shows GR4J
+sometimes matches observed low flows better in prolonged dry periods, so no
+assertion of GR6J superiority; only quantified divergence.
+
+**Identical-treatment rule (pre-registered 18 Nov 2026).** GR6J gets exactly
+the same treatment as GR4J everywhere:
+
+| setting | value (same as GR4J/HYD_00) |
+|---|---|
+| inputs | daily P_mm + PET (Oudin) from `model_inputs/<id>_obs.csv` |
+| period / warm-up | 1981-2014, warm-up = all of 1981 (365 d) |
+| calibration | 1982-2000, `Calibration_Michel`, objective = 1 - KGE (mm/day) |
+| validation | 2001-2014, out-of-sample |
+| screening | skip if < 3,650 valid observed Q-days in the calibration window |
+| units | Q in mm/day throughout |
+
+The only difference is the model structure: `airGR::RunModel_GR6J`
+(6 parameters; X1 production store, X2 exchange, X3 routing store, X4 UH
+time base, X5 exponential-store exchange coefficient, X6 exponential-store
+capacity).
+
+```{r gr6j-paths, include=FALSE}
+gr6j_project_root <- "D:/Datasets/CIMP6_India"
+gr6j_output_dir <- file.path(gr6j_project_root, "data_processed", "gr6j")
+dir.create(gr6j_output_dir, recursive = TRUE, showWarnings = FALSE)
+dir.create(file.path(gr6j_output_dir, "params"), showWarnings = FALSE)
+gr6j_log <- function(msg, log_file = file.path(gr6j_output_dir,
+                                               "gr6j_log.txt")) {
+   line <- paste0(format(Sys.time(), "%Y-%m-%d %H:%M:%S"), " | ", msg)
+   cat(line, "\n")
+   cat(line, "\n", file = log_file, append = TRUE)
+}
+
+# quick-test mode: a handful of catchments
+gr6j_test_mode <- FALSE
+gr6j_test_ids  <- c("03002", "03005", "03008")
+```
+
+**Materiality thresholds for the H2 divergence (pre-registered here, before
+any GR6J result exists):** a metric diverges *materially* if the median
+absolute GR6J-vs-GR4J divergence is (a) >= 0.10 for `logNSE` (a quarter of
+the GR4J validation-median range) or (b) >= 10 percentage points for the
+% bias metrics (q95_bias, lf_volume_bias, dry_spell_bias, mam7_bias).
+H2 stands if at least one metric diverges materially in at least one aridity
+tercile; H2 fails if no metric does anywhere (negative result, reported).
+
+```{r self-report}
+cat("=============================================================\n")
+cat(" GR6J setup loaded (GR6J_00_setup.Rmd)\n")
+cat("   outputs :", gr6j_output_dir, "\n")
+cat("   windows : identical to HYD_00 (1982-2000 calib / 2001-2014 valid)\n")
+cat("   warm-up : identical to HYD_00 (365 d) | PET: Oudin\n")
+cat("   test    :", gr6j_test_mode, "\n")
+cat("=============================================================\n")
+```
