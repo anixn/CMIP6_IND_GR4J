@@ -84,3 +84,26 @@ the secondary C21 benchmark.
   PCE); confirm before citing.
 - The repo's `paper.md` lives in `manuscript/` (not visible at repo root); the kit's
   commands reference the manuscript directory accordingly.
+
+## 1b. Data-description PDF verified (18 Nov 2026)
+
+`Data_description for CAMELS-IND-Proj_data.pdf` (192 KB, downloaded from Zenodo
+21775597 alongside the 11.3 GB zip; text extracted, 4 pages). Findings:
+
+- Confirmed: 13 CMIP6 GCMs x 4 SSPs (SSP126/245/370/585), daily streamflow (cumecs)
+  2015-2100, historical-per-GCM streamflow, forcings (pr mm, tasmax/tasmin C)
+  historical + future per GCM per SSP, hydroDL (Shen 2020) LSTM, 472 catchments,
+  `filter_catchment_model_scenario.py` inside the zip. All as briefed.
+- **Two-track rule hard-confirmed:** the acknowledgements explicitly thank
+  Mishra et al. 2020 for the bias-corrected CMIP6 precipitation/temperature data
+  (Zenodo 3987736) used as the forcing basis. CAMELS-IND-Proj forcings therefore
+  inherit the coarse-scale Mishra correction - they must never be our substrate;
+  Track-B-only status is now evidence-backed, not just strategic.
+- **"239 confidence-flagged catchments" still unverified:** the number does NOT
+  appear in this PDF (its file-structure section points at an embedded
+  table/figure not extractable from the text layer). Verification must come from
+  the downloaded zip contents (look for a confidence-flag column/file). Keep
+  "239" out of any manuscript text until then.
+- Bibliography anchors for P2 obtained: Singh/Mangukiya/Sahu/Sharma authorship
+  (IIT Roorkee Dept. of Hydrology; correspondence ashutosh.sharma@hy.iitr.ac.in);
+  APN grant CRRP2022-01MY-Sharma; FIG-100917.
