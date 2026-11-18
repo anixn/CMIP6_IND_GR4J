@@ -1,0 +1,214 @@
+---
+title: "DECOMP 00 -- Uncertainty decomposition of low-flow projections (H4): GCM x structure x EQM tail policy"
+subtitle: "Phase 4 of the low-flow framework (H4 / Objective 4) -- variance-component machinery; consumes the factor-tagged metric table assembled by the SSP pipeline"
+output:
+   html_document:
+      css: style_academic.css
+---
+
+```{r source-setup, include=FALSE}
+knitr::purl("HYD_00_setup.Rmd", file.path(tempdir(), "hyd00_setup.R"), documentation = 2)
+source(file.path(tempdir(), "hyd00_setup.R"))
+```
+
+# Notebook 00 -- Variance decomposition (H4 / Objective 4)
+
+**What this notebook does.** Partitions the variance of low-flow metrics
+into **GCM choice × hydrological model structure (GR4J/GR6J) × EQM tail
+policy**, blocked by catchment (and stratified by aridity tercile), with
+catchment-bootstrap CIs. This is the H4 machinery; it is deliberately
+**input-agnostic**: it reads one long-format table,
+
+```
+data_processed/decomp/input_metrics.csv
+   catchment, arid_tercile, ssp, window, metric,
+   gcm, structure ("GR4J"|"GR6J"), tail_policy ("constant"|"linear"),
+   value, n_gap_filled, extrapolation_share, metric_version
+```
+
+assembled by the SSP pipeline (QED_50 apply x2 tail policies -> HYD-style
+simulation per structure -> LOWFLOW-style metrics). A smoke test with
+simulated data validates the machinery before any real input exists.
+
+**Design (pre-registered 18 Nov 2026):**
+
+1. **Per catchment, per metric, per (ssp, window):** a three-way ANOVA
+   `value ~ gcm * structure * tail_policy` on the full factorial grid
+   (14 GCMs x 2 structures x 2 tail policies = 56 runs per catchment);
+   variance shares = SSterm / SStotal for gcm, structure, tail_policy and
+   their two-way interactions (residual = the rest). Type-I sequential
+   sums are avoided: the grid is complete and balanced, so SS are
+   orthogonal and ordering does not matter.
+2. **Aggregation:** variance shares are summarized by aridity tercile as
+   medians across catchments; catchment-bootstrap (1,000 resamples,
+   recorded seed) gives 95% CIs on each share.
+3. **H4 decision rule (AGENTS.md, fixed):** GCM is expected to dominate;
+   the structure share is "non-negligible" if its median share is >= 5%
+   in at least one aridity tercile for at least one headline metric.
+   H4 FAILS if structure < 5% everywhere — still a useful negative result.
+4. **No blending:** every metric is decomposed separately (responses are
+   never averaged into a composite before decomposition).
+
+```{r log-file}
+decomp_output_dir <- file.path(hyd_project_root, "data_processed", "decomp")
+dir.create(decomp_output_dir, recursive = TRUE, showWarnings = FALSE)
+decomp_log_file <- file.path(decomp_output_dir, "decomp_00_log.txt")
+```
+
+## 1. Configuration
+
+```{r config}
+decomp_n_boot  <- 1000L
+decomp_seed    <- 20261118L
+decomp_h4_structure_min <- 0.05   # structure share matters if >= 5%
+decomp_min_runs <- 56             # full factorial per catchment
+```
+
+## 2. Machinery (works on any input table with the factor columns)
+
+```{r machinery}
+decomp_one <- function(dt) {
+   # dt: one catchment x metric x ssp x window slice, full factorial grid
+   if (data.table::uniqueN(dt$gcm) < 3 ||
+       data.table::uniqueN(dt$structure) < 2 ||
+       data.table::uniqueN(dt$tail_policy) < 2) return(NULL)
+   fit <- stats::aov(value ~ gcm * structure * tail_policy, data = dt)
+   ss  <- summary(fit)[[1]][, "Sum Sq"]
+   # rownames are space-padded by the anova print method in some R builds;
+   # trim, then match with anchored patterns (substring matching would
+   # otherwise pollute interactions: "gcm" also matches "gcm:structure")
+   names(ss) <- trimws(rownames(summary(fit)[[1]]))
+   total <- sum(ss, na.rm = TRUE)
+   if (!is.finite(total) || total <= 0) return(NULL)
+   get_share <- function(pattern) {
+      k <- grepl(pattern, names(ss))
+      if (!any(k)) return(0)
+      sum(ss[k], na.rm = TRUE) / total
+   }
+   data.table::data.table(
+      share_gcm        = get_share("^gcm$"),
+      share_structure  = get_share("^structure$"),
+      share_tail       = get_share("^tail_policy$"),
+      share_gcm_struct = get_share("^gcm:structure$"),
+      share_gcm_tail   = get_share("^gcm:tail_policy$"),
+      share_struct_tail= get_share("^structure:tail_policy$"),
+      n_terms = length(ss))
+}
+
+decomp_run <- function(input, metrics, n_boot, seed) {
+   stopifnot(all(c("catchment", "arid_tercile", "metric", "gcm",
+                   "structure", "tail_policy", "value") %in% names(input)))
+   set.seed(seed)
+   shares <- input[!is.na(value), decomp_one(.SD),
+                   by = .(catchment, arid_tercile, metric)]
+   shares <- shares[!is.null(share_gcm)]   # drop NULL slices from failed fits
+
+   # tercile-median shares with catchment-bootstrap CIs
+   cats <- unique(shares$catchment)
+   boot_one <- function(b) {
+      pick <- sample(cats, size = length(cats), replace = TRUE)
+      shares[catchment %in% pick,
+              .(share_gcm = stats::median(share_gcm),
+                share_structure = stats::median(share_structure),
+                share_tail = stats::median(share_tail)),
+              by = .(arid_tercile, metric)][, b := b]
+   }
+   # (bootstrap done in the caller section so the deterministic first pass
+   #  is separable and auditable)
+   list(shares = shares)
+}
+```
+
+## 3. Smoke test: synthetic full-factorial grid (machinery validation)
+
+```{r smoke, eval=TRUE}
+set.seed(42)
+gcm      <- paste0("G", 1:14)
+structure <- c("GR4J", "GR6J")
+tailp    <- c("constant", "linear")
+sim <- data.table::CJ(gcm = gcm, structure = structure, tail_policy = tailp)
+sim[, value := 10 * (as.integer(factor(gcm)) - 7) / 7 +      # strong GCM effect
+              3.0 * (structure == "GR6J") +                  # modest structure
+              0.8 * (tail_policy == "linear") +              # small tail
+              stats::rnorm(.N, 0, 0.5)]
+sim[, `:=`(catchment = "T000", arid_tercile = "dry", metric = "q95_bias",
+           n_gap_filled = 0L, extrapolation_share = 0,
+           metric_version = "v1", ssp = "smoke", window = "smoke")]
+res <- decomp_run(sim, metrics = "q95_bias", n_boot = 10, seed = 1)$shares
+print(res)
+stopifnot(res$share_gcm > 0.5, res$share_structure > 0.05,
+          res$share_structure > res$share_tail)
+cat("smoke test passed: GCM-dominant grid recovers the planted order",
+    "(gcm > structure > tail)\n")
+```
+
+## 4. Production hook (runs when the SSP metric table exists)
+
+```{r production, eval=FALSE}
+# Runs only when data_processed/decomp/input_metrics.csv exists (assembled by
+# the SSP pipeline: QED_50 x2 tail policies -> GR4J+GR6J simulation ->
+# LOWFLOW-style metrics). Until then this chunk stays dormant so the
+# notebook always knits.
+input_fp <- file.path(decomp_output_dir, "input_metrics.csv")
+stopifnot(file.exists(input_fp))
+input_dt <- data.table::fread(input_fp, colClasses = list(character =
+                  c("catchment", "arid_tercile", "gcm", "structure",
+                    "tail_policy", "metric", "ssp", "window")))
+
+d <- decomp_run(input_dt, metrics = unique(input_dt$metric),
+                n_boot = decomp_n_boot, seed = decomp_seed)$shares
+data.table::fwrite(d, file.path(decomp_output_dir, "variance_shares.csv"))
+
+set.seed(decomp_seed)
+cats <- unique(d$catchment)
+boot_rows <- list()
+for (b in seq_len(decomp_n_boot)) {
+   pick <- sample(cats, size = length(cats), replace = TRUE)
+   boot_rows[[b]] <- d[catchment %in% pick,
+      .(share_gcm = stats::median(share_gcm),
+        share_structure = stats::median(share_structure),
+        share_tail = stats::median(share_tail)),
+      by = .(arid_tercile, metric)]
+}
+boot_all <- data.table::rbindlist(boot_rows, use.names = TRUE)
+ci <- boot_all[, .(lo = stats::quantile(share_structure, 0.025),
+                   hi = stats::quantile(share_structure, 0.975)),
+               by = .(arid_tercile, metric)]
+
+med <- d[, .(median_share_gcm = round(stats::median(share_gcm), 3),
+             median_share_structure = round(stats::median(share_structure), 3),
+             median_share_tail = round(stats::median(share_tail), 3)),
+         by = .(arid_tercile, metric)]
+tab <- merge(med, ci, by = c("arid_tercile", "metric"))
+data.table::fwrite(tab, file.path(decomp_output_dir, "h4_summary.csv"))
+
+h4_stands <- any(tab$median_share_structure >= decomp_h4_structure_min)
+verdict <- if (h4_stands) "H4 STANDS (structure share non-negligible somewhere)"
+           else "H4 FAILS (structure < 5% everywhere -- useful negative result)"
+writeLines(c(
+   "# H4 verdict -- variance decomposition of low-flow projections",
+   "",
+   paste0("**Date:** ", format(Sys.time()), " | seed ", decomp_seed,
+          " | bootstrap resamples: ", decomp_n_boot),
+   "",
+   paste0("**Rule (AGENTS.md):** GCM dominates; structure share >= 5% in ",
+          ">= 1 tercile x metric means structure matters for adaptation."),
+   "",
+   paste0("**Verdict: ", verdict, "**"),
+   "",
+   knitr::kable(tab),
+   "",
+   "Responses never blended: one decomposition per metric per tercile."),
+   file.path(decomp_output_dir, "h4_verdict.md"))
+print(tab)
+```
+
+## Take-away
+
+- The machinery is validated by the planted-effect smoke test (GCM-dominant
+  grid recovers gcm > structure > tail ordering).
+- The production chunk activates exactly when the SSP pipeline delivers
+  `input_metrics.csv`; the H4 verdict is written against the pre-registered
+  rule with bootstrap CIs, per metric, per aridity tercile.
+- If the structure share is < 5% everywhere, that is the reported result:
+  Objective 4 collapses to GCM + bias-correction only (per AGENTS.md).
