@@ -255,12 +255,7 @@ print(win_rate)
 
 # H5 verdict: falsified iff LSTM wins EVERY metric on the shared set
 all_won <- all(win_rate$lstm_win_share > 0.5)
-h5_verdict <- if (all_won)
-   "H5 FALSIFIED -- LSTM dominates on all low-flow metrics (publish as benchmark confirmation, framed as such)"
-else paste0("H5 STANDS -- LSTM does not uniformly beat GR4J at low flows ",
-            "(metrics where LSTM wins overall: ",
-            paste(win_rate[lstm_win_share > 0.5, metric],
-                  collapse = ", "), ")")
+h5_verdict <- if (all_won) "H5 FALSIFIED -- LSTM dominates on all low-flow metrics (publish as benchmark confirmation, framed as such)" else paste0("H5 STANDS -- LSTM does not uniformly beat GR4J at low flows (metrics where LSTM wins overall: ", paste(win_rate[lstm_win_share > 0.5, metric], collapse = ", "), ")")
 
 writeLines(c(
    "# H5 verdict -- LSTM benchmark vs GR4J at low flows",
