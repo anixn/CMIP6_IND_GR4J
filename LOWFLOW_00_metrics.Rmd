@@ -239,15 +239,17 @@ low_simulate <- function(id, tier, lat, model, full_dates, i_warm, i_run_full,
 
 ```{r driver}
 # reason code for a metric that lands NA despite enough paired days
-low_na_reason <- function(metric, pairs, q90_o) {
-   switch(metric,
-      "logNSE"         = "log_zero_variance",
-      "q95_bias"       = if (q90_o <= 0 || min(pairs$o) <= 0) "ephemeral_threshold_zero"
-                         else "q95_guard",
-      "lf_volume_bias" = "no_days_below_q90",
-      "dry_spell_bias" = "no_obs_dry_spell",
-      "mam7_bias"      = "mam7_degenerate",
-      "metric_guard")
+# (vectorized over the metric column; q90_o / pairs from the caller scope)
+low_na_reason_vec <- function(metric, pairs, q90_o) {
+   ephemeral <- (q90_o <= 0 || min(pairs$o) <= 0)
+   fcase(
+      metric == "logNSE",         "log_zero_variance",
+      metric == "q95_bias",       if (ephemeral) "ephemeral_threshold_zero"
+                                  else "q95_guard",
+      metric == "lf_volume_bias", "no_days_below_q90",
+      metric == "dry_spell_bias", "no_obs_dry_spell",
+      metric == "mam7_bias",      "mam7_degenerate",
+      default = "metric_guard")
 }
 
 low_metric_rows <- function(id, model, dates, o, s, n_gap, n_extrap) {
@@ -280,7 +282,7 @@ low_metric_rows <- function(id, model, dates, o, s, n_gap, n_extrap) {
 
    base[, value := round(as.numeric(vals), 5)]
    base[is.na(value), metric_note :=
-           low_na_reason(metric, pairs, q90_o)]
+           low_na_reason_vec(metric, pairs, q90_o)]
    list(rows = base, excluded = FALSE)
 }
 ```
