@@ -1,0 +1,312 @@
+---
+title: "QED 40 -- Aggregate CMIP6 SSP runs to catchment means (2015-2100, 14 shortlisted models x 4 SSPs)"
+subtitle: "CAMELS-India quantile mapping workflow, SSP data-preparation notebook (parallel to QED_05, no edits to existing notebooks)"
+output:
+   html_document:
+      css: style_academic.css
+---
+
+```{r source-setup, include=FALSE}
+knitr::purl("QED_00_setup.Rmd", file.path(tempdir(), "qed00_setup.R"), documentation = 2)
+source(file.path(tempdir(), "qed00_setup.R"))
+```
+
+# Notebook 40 -- Aggregate raw CMIP6 **SSP** runs to catchment means
+
+**What this notebook does.** The SSP-era twin of `QED_05_aggregate_cmip6.Rmd`
+(which stays untouched -- new modules are parallel, never invasive). It turns
+the raw CMIP6 scenario NetCDF daily files into wide catchment-mean CSVs that
+the SSP quantile-mapping notebook (`QED_50_ssp_apply.Rmd`, to be written) will
+read:
+
+* input dir: the flat download root
+  `D:/Datasets/Download_CMIP/data_raw/cmip6/` (files land flat there, unlike
+  the historical archive which is organised into `pr/`, `tasmax/`, `tasmin/`
+  subfolders). Same naming convention:
+  `<var>_day_<model>_<ssp>_<member>_<grid>_<year>_v<ver>.nc`;
+* models: the **14 hybrid-shortlisted** models from
+  `data_processed/hyd/model_shortlist_final.csv` (`selected == 1`) --
+  NOT all 22 historical models (the selection is already done);
+* scenarios: **ssp126, ssp245, ssp370, ssp585** (AR6 core matrix; ssp370 added
+  18 Nov 2026 for drought-envelope completeness and CAMELS-IND-Proj
+  comparability);
+* windows: near 2015-2040, mid 2041-2060, long 2081-2100 (the download plan).
+  **The gap years 2061-2080 were never downloaded by design**, so the output
+  columns cover only the three windows; the gap is logged, never hidden;
+* output layout: one CSV per model x ssp x variable
+  (`data_processed/ssp/agg_<var>_<model>_<ssp>.csv`), first column `id`
+  (5-digit gauge ids), remaining columns one calendar day
+  `YYYYMMDD` (24,206 window days), one row per catchment (472);
+* everything else identical to QED_05: cell-area-weighted catchment means
+  (cos-lat), pr kg m-2 s-1 -> mm/day, tas K -> degC, 365-day calendars mapped
+  by `terra::time()` (Feb 29 -> NA), the 360-day calendar of HadGEM3-GC31-MM
+  mapped day 1..30 of each real month (invalid dates -> NA).
+
+**Design decisions pre-registered here (18 Nov 2026):**
+
+1. SSP aggregation reads from the download root directly -- no copying of
+   bulk nc files into the repo.
+2. Agg CSVs land in `data_processed/ssp/`, a directory QED_05 never touches
+   (its stale-file cleanup in `data_processed/` would otherwise delete them).
+3. EQM for the SSP leg will be fitted on the **full historical 1981-2014**
+   (observed CAMELS forcings vs each model's historical run) and applied to
+   the SSP series with `pr` tail policy **"linear"** (constant clamping would
+   truncate intensified future rainfall extremes; this was already the
+   recommendation in the download script header). The out-of-sample
+   fit-1981-2000/score-2001-2014 discipline belongs to model *ranking*
+   (QED_20/30), not to projection *application*; this is stated here so the
+   choice is dated and reviewable.
+4. Every missing model x ssp x variable combo (or missing year inside a
+   combo) gets a log line AND a row in
+   `data_processed/logs/QED_40_ssp_exclusions.csv` -- no silent drops.
+
+```{r log-file}
+qed_ssp_agg_dir <- file.path(qed_project_root, "data_processed", "ssp")
+dir.create(qed_ssp_agg_dir, recursive = TRUE, showWarnings = FALSE)
+qed_ssp_log_file <- file.path(qed_ssp_agg_dir, "qed_40_log.txt")
+```
+
+## 1. SSP configuration
+
+```{r ssp-config}
+# Raw nc root (flat layout from download_cmip6_ssp.R)
+qed_ssp_raw_dir <- "D:/Datasets/Download_CMIP/data_raw/cmip6"
+
+# Scenarios: AR6 core matrix
+qed_ssp_list <- c("ssp126", "ssp245", "ssp370", "ssp585")
+
+# Analysis windows (must mirror time_windows in download_cmip6_ssp.R)
+qed_ssp_windows <- list(
+   near = c(as.Date("2015-01-01"), as.Date("2040-12-31")),
+   mid  = c(as.Date("2041-01-01"), as.Date("2060-12-31")),
+   long = c(as.Date("2081-01-01"), as.Date("2100-12-31"))
+)
+
+# Smoke-test mode: 1 model x 1 ssp x 10 catchments. FALSE for production.
+qed_ssp_test_mode <- FALSE
+```
+
+```{r ssp-model-list}
+shortlist <- data.table::fread(file.path(qed_project_root, "data_processed",
+                                         "hyd", "model_shortlist_final.csv"))
+models_ssp <- shortlist[selected == 1, model]
+stopifnot(length(models_ssp) == 14)   # guard: the hybrid shortlist is fixed
+cat("Shortlisted models:", length(models_ssp), "\n")
+cat(paste(models_ssp, collapse = ", "), "\n")
+```
+
+## 2. Daily column grid for the three windows
+
+```{r grid}
+# Full daily index per window, then concatenated (the 2061-2080 gap stays out)
+window_dates <- lapply(qed_ssp_windows, function(w) seq(w[1], w[2], by = "day"))
+ssp_dates    <- do.call(c, unname(window_dates))
+ssp_cols     <- format(ssp_dates, "%Y%m%d")
+n_days_ssp   <- length(ssp_cols)
+
+# sanity: expected window sizes (26 y incl 7 leap = 9497 | 20 y incl 5 leap =
+# 7305 | 20 y incl 4 leap = 7304)
+stopifnot(length(window_dates$near) == 9497,
+          length(window_dates$mid)  == 7305,
+          length(window_dates$long) == 7304)
+cat("SSP grid:", n_days_ssp, "window days (gap 2061-2080 excluded by design)\n")
+```
+
+## 3. Discover SSP files in the raw archive
+
+```{r discover}
+# Files land flat: <var>_day_<model>_<ssp>_<member>_<grid>_<year>_v<ver>.nc
+# token 3 = model, token 4 = ssp, year from the _YYYY_v pattern (as in QED_05)
+fl <- list.files(qed_ssp_raw_dir, pattern = "_day_.*_ssp[0-9]+_.*\\.nc$",
+                 full.names = TRUE)
+stopifnot(length(fl) > 0)
+
+tok  <- strsplit(basename(fl), "_")
+var_of   <- vapply(tok, `[`, character(1), 1)
+model_of <- vapply(tok, `[`, character(1), 3)
+ssp_of   <- vapply(tok, `[`, character(1), 4)
+year_of  <- as.integer(sub("^.*_([0-9]{4})_v.*$", "\\1", basename(fl)))
+
+# keep only our variables and shortlisted models x scenarios
+keep <- var_of %in% qed_vars & model_of %in% models_ssp & ssp_of %in% qed_ssp_list
+fl   <- fl[keep]
+var_of <- var_of[keep]; model_of <- model_of[keep]
+ssp_of <- ssp_of[keep]; year_of <- year_of[keep]
+cat(length(fl), "SSP nc files on disk for the", length(models_ssp), "x",
+    length(qed_ssp_list), "shortlist grid\n")
+
+# what is present vs expected (14 models x 4 ssps x 3 vars x 66 years)
+expected_years <- sort(unique(unlist(lapply(qed_ssp_windows,
+   function(w) as.integer(format(w[1], "%Y")):as.integer(format(w[2], "%Y"))))))
+ssp_files <- split(seq_along(fl), list(var = var_of, model = model_of,
+                                       ssp = ssp_of))
+# exclusions log: any combo with NO file at all, and any missing year
+excl <- list()
+have_combo <- paste(var_of, model_of, ssp_of, sep = "|")
+for (v in qed_vars) for (m in models_ssp) for (s in qed_ssp_list) {
+   key <- paste(v, m, s, sep = "|")
+   yrs_here <- year_of[have_combo == key]
+   if (length(yrs_here) == 0) {
+      excl[[length(excl) + 1L]] <- data.table::data.table(
+         module = "QED_40", detail = paste(v, m, s, sep = "|"),
+         reason_code = "combo_absent",
+         n_missing_years = length(expected_years))
+   } else {
+      miss <- setdiff(expected_years, yrs_here)
+      if (length(miss)) {
+         excl[[length(excl) + 1L]] <- data.table::data.table(
+            module = "QED_40", detail = paste0(key, "|years:",
+                                               paste(miss, collapse = ";")),
+            reason_code = "years_missing",
+            n_missing_years = length(miss))
+      }
+   }
+}
+excl_dt <- data.table::rbindlist(excl, use.names = TRUE, fill = TRUE)
+if (nrow(excl_dt)) {
+   data.table::fwrite(excl_dt,
+                      file.path(qed_project_root, "data_processed", "logs",
+                                "QED_40_ssp_exclusions.csv"))
+   cat("Logged exclusions:", nrow(excl_dt),
+       "(data_processed/logs/QED_40_ssp_exclusions.csv)\n")
+} else {
+   cat("No missing combos or years -- full grid on disk\n")
+}
+```
+
+## 4. Catchment polygons (read once)
+
+```{r polygons}
+polys <- sf::st_as_sf(terra::vect(file.path(qed_project_root, "data_raw",
+                                            "catchments", "merged",
+                                            "all_catchments.shp")))
+polys$id <- qed_normalize_id(polys$gauge_id)
+n_polys <- nrow(polys)
+if (qed_ssp_test_mode) polys <- polys[1:10, ]
+cat("Polygons:", n_polys, "\n")
+```
+
+## 5. Date mapping helper (handles the 360-day calendar)
+
+Identical to QED_05 -- repeated here so this notebook stays self-contained
+without sourcing an existing notebook.
+
+```{r date-helper}
+qed_ssp_nc_dates <- function(r, year) {
+   nl <- terra::nlyr(r)
+   if (nl == 360) {
+      m <- (seq_len(nl) - 1L) %/% 30L + 1L
+      d <- (seq_len(nl) - 1L) %% 30L + 1L
+      dt <- as.Date(sprintf("%04d-%02d-%02d", year, m, d))  # Feb 30 -> NA
+   } else {
+      dt <- as.Date(terra::time(r))
+   }
+   dt
+}
+```
+
+## 6. Aggregate: one pass per model x ssp x variable
+
+```{r aggregate, eval=TRUE}
+unit_scale  <- c(pr = 86400, tasmax = -273.15, tasmin = -273.15)
+unit_is_add <- c(pr = FALSE, tasmax = TRUE,  tasmin = TRUE)
+
+combos <- expand.grid(var = qed_vars, model = models_ssp,
+                      ssp = qed_ssp_list, stringsAsFactors = FALSE)
+# keep only combos with at least one file on disk
+combos$have <- paste(combos$var, combos$model, combos$ssp, sep = "|") %in%
+   names(ssp_files)
+combos <- combos[combos$have, ]
+if (qed_ssp_test_mode) combos <- combos[combos$model == models_ssp[1] &
+                                        combos$ssp == qed_ssp_list[1], ]
+
+for (i in seq_len(nrow(combos))) {
+   v <- combos$var[i]; model <- combos$model[i]; s <- combos$ssp[i]
+   idx <- ssp_files[[paste(v, model, s, sep = "|")]]
+   files <- sort(fl[idx])
+   yrs   <- year_of[idx]
+   files <- files[yrs %in% expected_years]
+   yrs   <- yrs[yrs %in% expected_years]
+
+   out <- matrix(NA_real_, nrow = n_polys, ncol = n_days_ssp,
+                 dimnames = list(polys$id, ssp_cols))
+   n_files_bad <- 0L
+
+   for (j in seq_along(files)) {
+      f <- files[j]; yr <- yrs[j]
+      res <- tryCatch({
+         r  <- terra::rast(f)
+         dt <- qed_ssp_nc_dates(r, yr)
+         w  <- cos(terra::init(r, "y") * pi / 180)      # cell-area weights
+         ex <- exactextractr::exact_extract(
+            r, polys, "weighted_mean", weights = w,
+            stack_apply = TRUE, progress = FALSE)
+         vals <- as.matrix(ex)                          # [n_polys, nl]
+         vals <- if (unit_is_add[[v]]) vals + unit_scale[[v]]
+                 else vals * unit_scale[[v]]
+         idx_day <- match(format(dt, "%Y%m%d"), ssp_cols)  # NA for invalid
+         keep <- !is.na(idx_day)
+         out[, idx_day[keep]] <- vals[, keep, drop = FALSE]
+         TRUE
+      }, error = function(e) {
+         qed_log(paste("ERROR", model, s, v, basename(f),
+                       conditionMessage(e)), qed_ssp_log_file)
+         FALSE
+      })
+      if (!isTRUE(res)) n_files_bad <- n_files_bad + 1L
+   }
+
+   fp <- file.path(qed_ssp_agg_dir,
+                   sprintf("agg_%s_%s_%s.csv", v, model, s))
+   dt_out <- data.table::as.data.table(out)
+   dt_out[, id := rownames(out)]
+   data.table::setcolorder(dt_out, "id")
+   data.table::fwrite(dt_out, fp)
+
+   n_cov  <- sum(!is.na(out[1, ]))
+   n_noleap_na <- sum(is.na(out[1, ]))   # Feb-29 cols of noleap models + gaps
+   qed_log(sprintf("agg %s %s %s: %d/%d files ok, %d/%d window days covered, %d NA",
+                   v, model, s, length(files) - n_files_bad, length(files),
+                   n_cov, n_days_ssp, n_noleap_na), qed_ssp_log_file)
+   cat("done:", v, model, s, "\n")
+}
+```
+
+## 7. Verification
+
+```{r verify}
+made <- list.files(qed_ssp_agg_dir, pattern = "^agg_(pr|tasmax|tasmin)_.*_ssp[0-9]+\\.csv$",
+                   full.names = TRUE)
+base_of  <- tools::file_path_sans_ext(basename(made))
+parts    <- strsplit(base_of, "_")   # agg, var, model..., ssp
+# model names contain "-" but not "_", ssp is the last token
+var_of2  <- vapply(parts, `[`, character(1), 2)
+ssp_of2  <- vapply(parts, `[`, character(1), length(parts[[1]]))
+model_of2 <- vapply(parts, function(p) paste(p[3:(length(p) - 1)], collapse = "_"))
+
+combos_made <- data.table::expand.grid(model = model_of2, ssp = ssp_of2,
+                                       var = var_of2, stringsAsFactors = FALSE)
+n_expected <- nrow(expand.grid(model = models_ssp, ssp = qed_ssp_list,
+                               var = qed_vars))
+cat("Agg files written:", nrow(combos_made), "of", n_expected, "expected\n")
+missing <- data.table::setdiff(
+   data.table::expand.grid(model = models_ssp, ssp = qed_ssp_list,
+                           var = qed_vars, stringsAsFactors = TRUE),
+   combos_made)
+if (nrow(missing)) {
+   cat("MISSING (already logged in QED_40_ssp_exclusions.csv):\n")
+   print(missing)
+}
+stopifnot(nrow(combos_made) > 0)   # never wipe outputs on a parse mistake
+qed_log("QED_40 done", qed_ssp_log_file)
+```
+
+**Handoff contract for `QED_50_ssp_apply.Rmd`:** read these agg files with
+`qed_read_agg()` (layout is identical to the historical aggs), fit EQM per
+catchment x variable on the historical 1981-2014 pair (observed reference vs
+`agg_<var>_<model>.csv` from QED_05), apply to each SSP series with
+`qed_extrap_pr <- "linear"`, `qed_extrap_temp <- "linear"`, and carry the
+`within_range` / `extrapolated_low` / `extrapolated_high` flags through
+unchanged. NAs here mean: window gap (2061-2080), Feb-29 of noleap models,
+or 360-day-calendar invalid dates -- downstream modules must count them in
+`n_gap_filled`, never fill silently.
