@@ -105,6 +105,19 @@ Two mechanistic observations from the metric layer, reported as findings (not tu
 - On ephemeral catchments, CMIP-driven GR4J keeps baseflow running where the observed stream nearly dries up (simulated 10th-percentile flow ≈ 7× observed; simulated series never fall below the observed Q90 threshold → dry-spell bias −100%), while underestimating mean flow on the same catchments. Whole-flow KGE is nearly blind to this; the low-flow metrics are not — the empirical basis of the divergence.
 - Observed SPI-12→SRI-12 propagation lags (frozen, 167 catchments) concentrate at 0–1 months (median 1; 150/167), with the mean |SRI−SPI| diagnostic ≈ 0.4–0.7 — far from the ≈0.013 Machhar-type coupling-artefact signature, confirming the observed benchmark is fit for the H3 comparison.
 
+### 5.3 H3 verdict: drought-propagation reproduction (Phase 3)
+
+SPI-12→SRI-12 propagation was computed for all 22 models (corrected-forcing SPI-12; full-period GR4J-simulated SRI-12, 1982–2014) against the **frozen** observed lags, with the pre-registered reproduction band `|L_model − L_obs| ≤ 1 month` and the pre-registered three-clause falsification rule (`PROP_PRE_REGISTRATION.md`, dated before any model SRI was computed).
+
+**H3 STANDS** (verdict file: `data_processed/prop/h3_verdict.md`) — with a structure that matters for the selection story:
+
+- **Clauses 1–2 TRUE:** every model reproduces 0.91–0.96 of catchments and the inter-model spread is < 0.10 — reproduction of the observed 0–1-month propagation regime is nearly universal, and models differ only marginally on it.
+- **Clause 3 FALSE:** ρ(forcing rank, prop_share) = **−0.350** — mean-flow selection does not find propagation skill. The two *kinds* of skill (whole-flow forcing skill vs drought-propagation fidelity) are again nearly orthogonal, consistent with H1's near-zero wedge: a framework that selects on mean-flow skill alone cannot claim propagation competence.
+- **Artefact audit passed:** per-model mean |SRI−SPI| = 0.29–0.34, far from the ≈ 0.013 Machhar-type too-tight-coupling signature — propagation times were measured, not assumed by construction.
+- 109 model-combos excluded with reason codes (77 SRI gamma-fit failures, 32 SPI gamma-fit failures; per-model denominators 156–166, logged in `PROP_10_exclusions.csv`).
+
+**Implication carried forward to Objective 4:** because clause 3 fails, the drought-propagation criterion enters the selection test as a distinct dimension, not a corollary of forcing rank — models near-universal on the frozen band but unrankable by mean-flow skill is precisely the case the two-stage + propagation framework was built to separate.
+
 ### 5.2 H2 verdict: GR4J vs GR6J structural divergence (observed forcings, base case)
 
 GR6J was calibrated under the identical-treatment rule (192 catchments calibrated under both structures; median validation KGE 0.527 vs GR4J 0.543, paired Wilcoxon p = 0.45 — the structures are comparable at the whole-flow level, so the low-flow comparison is the informative one). Low-flow metrics were computed for both structures on observed forcings (172 paired catchments, evaluation window 2001–2014).
