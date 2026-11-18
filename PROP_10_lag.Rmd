@@ -1,0 +1,370 @@
+---
+title: "PROP 10 -- Model propagation lags: corrected-forcing SPI-12 vs GR4J-driven SRI-12, reproduction shares, H3 verdict"
+subtitle: "Phase 3 of the low-flow framework (H3 / Objective 3) -- consumes the FROZEN observed lags; parallel module"
+output:
+   html_document:
+      css: style_academic.css
+---
+
+```{r source-setup, include=FALSE}
+knitr::purl("HYD_00_setup.Rmd", file.path(tempdir(), "hyd00_setup.R"), documentation = 2)
+source(file.path(tempdir(), "hyd00_setup.R"))
+```
+
+# Notebook 10 -- Model leg of the propagation test
+
+**What this notebook does.** The MODEL leg of `PROP_PRE_REGISTRATION.md`
+(pre-registered 18 Nov 2026). For every catchment in the FROZEN
+`observed_lags.csv` and every model with corrected series:
+
+1. **SPI-12 (model)**: monthly totals of the EQM-corrected precipitation
+   (`qm_corrected/<model>/<tier>/<id>_pr.csv`), 12-month accumulation,
+   gamma-MLE / normal-quantile standardization on the model's own
+   1981-2014 accumulation sample (the pre-registered convention, identical
+   to the observed leg).
+2. **SRI-12 (model)**: GR4J simulated discharge over the FULL run window
+   1982-2014 (warm-up 1981 -- identical to HYD_30; the LOWFLOW_00 series
+   cache only covers the 2001-2014 evaluation window, too short for the
+   pre-registered SRI reference period, so this module re-simulates the
+   full period and caches it under `data_processed/prop/qsim_full/` for
+   reuse), monthly totals -> 12-month accumulation -> same gamma
+   standardization on the model's own sample.
+3. **Propagation lag** `L_model` = argmax cross-correlation SPI-12 vs
+   SRI-12 lagged behind SPI, lags 0..12 (ties -> smallest), the only
+   allowed propagation definition. `mean|SRI - SPI|` is computed as the
+   artefact diagnostic ONLY (Machhar-type trap check), never in rankings.
+4. **Reproduction** against the FROZEN band: `|L_model - L_obs| <= 1`
+   month. Per-model reproduction share -> `prop_model_scores.csv`.
+5. **H3 verdict** exactly per pre-registration section 4 (three falsifying
+   clauses); verdict written to `h3_verdict.md` with today's date.
+
+**The freeze contract:** observed lags come from
+`data_processed/prop/observed_lags.csv` as-is. If that file is missing, this
+notebook refuses to run.
+
+```{r log-file}
+prop_output_dir <- file.path(hyd_project_root, "data_processed", "prop")
+prop_log_file   <- file.path(prop_output_dir, "prop_10_log.txt")
+lags_fp <- file.path(prop_output_dir, "observed_lags.csv")
+stopifnot(file.exists(lags_fp))   # PROP_00 must have frozen the observed lags
+```
+
+## 1. Configuration (mirrors the pre-registration)
+
+```{r config}
+prop_band_months   <- 1        # |L_model - L_obs| <= 1 = reproduced
+prop_min_month_days <- 0.8
+prop_min_months    <- 144
+prop_max_lag       <- 12L
+prop_min_overlap_cor <- 60
+prop_h3_share_min  <- 0.80     # falsifying clause 1
+prop_h3_spread_max <- 0.10     # falsifying clause 2
+prop_h3_rho_min    <- 0.6      # falsifying clause 3
+prop_test_mode     <- FALSE    # TRUE: 10 catchments x 3 models
+```
+
+## 2. Index machinery (identical convention to PROP_00 -- kept in step)
+
+```{r index-fns}
+prop_monthly <- function(dt, col) {
+   dt[, ym := format(as.Date(date), "%Y-%m")]
+   agg <- dt[, .(tot = if (sum(!is.na(get(col))) >= prop_min_month_days * .N)
+                    sum(get(col), na.rm = TRUE) else NA_real_), by = ym]
+   agg[, date := as.Date(paste0(ym, "-01"))]
+   agg[order(date), .(date, ym, tot)]
+}
+
+prop_acc12 <- function(x) data.table::frollsum(x, n = 12, na.rm = FALSE)
+
+prop_standardize <- function(x) {
+   x <- x[is.finite(x)]
+   if (length(x) < prop_min_months) return(list(ok = FALSE, reason = "insufficient_months"))
+   if (any(x <= 0))                 return(list(ok = FALSE, reason = "zero_accumulation"))
+   m <- mean(x); v <- stats::var(x)
+   if (!is.finite(v) || v <= 0)     return(list(ok = FALSE, reason = "degenerate_variance"))
+   fit <- tryCatch(
+      MASS::fitdistr(x, densfun = "gamma",
+                     start = list(shape = max(m^2 / v, 0.01),
+                                  scale = max(v / m, 1e-8))),
+      error = function(e) e)
+   if (inherits(fit, "error")) return(list(ok = FALSE, reason = "gamma_fit_failed"))
+   list(ok = TRUE, shape = fit$estimate[["shape"]],
+        scale = fit$estimate[["scale"]])
+}
+
+prop_spi_value <- function(x, shape, scale) stats::qnorm(
+   stats::pgamma(x, shape = shape, scale = scale))
+
+prop_lag <- function(spi, sri) {
+   n <- length(spi)
+   cors <- rep(NA_real_, prop_max_lag + 1L)
+   for (L in 0:prop_max_lag) {
+      if (n - L < prop_min_overlap_cor) next
+      i1 <- seq_len(n - L); i2 <- seq.int(L + 1L, n)
+      ok <- is.finite(spi[i1]) & is.finite(sri[i2])
+      if (sum(ok) < prop_min_overlap_cor) next
+      cors[L + 1L] <- stats::cor(spi[i1][ok], sri[i2][ok])
+   }
+   L <- which.max(cors) - 1L
+   list(L = as.integer(L), r = cors[L + 1L], cors = cors)
+}
+```
+
+## 3. Simulation core (identical to HYD_30 / LOWFLOW_00; full-period Qsim)
+
+```{r sim-fns}
+zoo_gapfill <- function(x) {
+   i_na <- which(is.na(x))
+   if (length(i_na) == 0) return(x)
+   x[i_na] <- stats::approx(seq_along(x), x, xout = i_na, rule = 2)$y
+   x
+}
+
+hyd_read_corrected <- function(model, tier, id, var) {
+   dt <- data.table::fread(file.path(hyd_qm_corr_dir, model, tier,
+                                     paste0(id, "_", var, ".csv")),
+                           select = c("date", "corrected_value", "method_flag"))
+   data.table::setnames(dt, "corrected_value", var)
+   dt
+}
+
+low_simulate_full <- function(id, tier, lat, model, full_dates, i_warm, i_run_full) {
+   obs <- data.table::fread(file.path(hyd_inputs_dir, paste0(id, "_obs.csv")),
+                            select = c("date", "Qobs_mm"))
+   prm <- readRDS(file.path(hyd_output_dir, "params", paste0(id, ".rds")))
+
+   pc <- hyd_read_corrected(model, tier, id, "pr")
+   tx <- hyd_read_corrected(model, tier, id, "tasmax")
+   tn <- hyd_read_corrected(model, tier, id, "tasmin")
+   dt <- Reduce(function(x, y) merge(x, y, by = "date", all = TRUE),
+                list(pc, tx, tn))
+   dt <- merge(obs, dt, by = "date", all.x = TRUE)
+   dt <- dt[order(as.Date(date))]
+   dt[, Tmean_C := (tasmax + tasmin) / 2]
+
+   n_gap <- sum(is.na(dt$Tmean_C))
+   if (n_gap > 0) {
+      dt[, Tmean_C := zoo_gapfill(Tmean_C)]
+      dt[, tasmax := zoo_gapfill(tasmax)]
+      dt[, tasmin := zoo_gapfill(tasmin)]
+      dt[is.na(pr), pr := 0]
+      if (sum(is.na(dt$Tmean_C)) > 0) stop("unfillable input gaps (n=", n_gap, ")")
+   }
+   dt[, PET_mm := airGR::PE_Oudin(JD = as.integer(format(as.Date(date), "%j")),
+                                  Temp = Tmean_C, Lat = lat, LatUnit = "deg")]
+
+   inputs <- airGR::CreateInputsModel(FUN_MOD = airGR::RunModel_GR4J,
+                                      DatesR = as.POSIXct(as.Date(dt$date)),
+                                      Precip = dt$pr, PotEvap = dt$PET_mm)
+   run_opt <- airGR::CreateRunOptions(FUN_MOD = airGR::RunModel_GR4J,
+                                      InputsModel = inputs,
+                                      IndPeriod_WarmUp = i_warm,
+                                      IndPeriod_Run = i_run_full)
+   out <- airGR::RunModel(inputs, run_opt, Param = prm$param,
+                          FUN_MOD = airGR::RunModel_GR4J)
+   list(qsim = out$Qsim, dates = full_dates[-i_warm])   # run-window dates
+}
+```
+
+## 4. Roster + models
+
+```{r roster}
+observed_lags <- data.table::fread(lags_fp, colClasses = list(character = "catchment"))
+calib <- data.table::fread(file.path(hyd_output_dir, "hyd_calib_summary.csv"),
+                           colClasses = list(character = "id"))
+inv <- data.table::fread(file.path(hyd_qed_dir, "inventory.csv"),
+                         colClasses = list(character = "id"))
+topo <- data.table::fread(hyd_topo_fp, colClasses = list(character = "gauge_id"))
+topo[, id := hyd_normalize_id(gauge_id)]
+
+roster <- merge(observed_lags, inv[, .(id, tier = final_action)],
+                by.x = "catchment", by.y = "id")
+roster <- merge(roster, topo[, .(id, cwc_lat)], by.x = "catchment", by.y = "id")
+roster <- roster[file.exists(file.path(hyd_output_dir, "params",
+                                       paste0(catchment, ".rds")))]
+if (prop_test_mode) roster <- roster[1:10]
+cat("Frozen-lag catchments to simulate:", nrow(roster), "\n")
+
+ranking <- data.table::fread(file.path(hyd_qed_dir, "model_ranking_overall.csv"))
+models <- ranking$model[sapply(ranking$model, function(m) {
+   dir.exists(file.path(hyd_qm_corr_dir, m)) })]
+if (prop_test_mode) models <- models[1:3]
+cat("Models:", length(models), "\n")
+```
+
+## 5. Model leg: SPI-12 + full-period SRI-12 -> L_model
+
+```{r run-model, eval=TRUE}
+full_dates <- seq(hyd_period_start, hyd_period_end, by = "day")
+i_warm     <- seq(1L, hyd_warmup_days)
+i_run_full <- seq(1L, length(full_dates))[-i_warm]
+
+qsim_dir <- file.path(prop_output_dir, "qsim_full")
+dir.create(qsim_dir, recursive = TRUE, showWarnings = FALSE)
+
+lag_rows <- list(); excl <- list(); n_row <- 0L
+
+for (i in seq_len(nrow(roster))) {
+   id <- roster$catchment[i]; tier <- roster$tier[i]; lat <- roster$cwc_lat[i]
+
+   # ---- cache Qsim for this catchment (all models, one pass) -----------------
+   fp <- file.path(qsim_dir, paste0(id, ".rds"))
+   if (file.exists(fp)) {
+      cached <- readRDS(fp)
+   } else {
+      cached <- setNames(vector("list", length(models)), models)
+   }
+
+   for (m in models) {
+      if (!is.null(cached[[m]])) next
+      sim <- tryCatch(
+         low_simulate_full(id, tier, lat, m, full_dates, i_warm, i_run_full),
+         error = function(e) {
+            excl[[length(excl) + 1L]] <- data.table::data.table(
+               module = "PROP_10", catchment = id, model = m,
+               reason_code = "simulation_error",
+               detail = conditionMessage(e))
+            NULL
+         })
+      if (is.null(sim)) next
+      cached[[m]] <- sim
+   }
+   saveRDS(cached, fp)   # partial cache is safe: filled models are kept
+
+   # ---- SPI-12 (model) + SRI-12 (model) -> lag, per model -------------------
+   for (m in names(cached)) {
+      if (is.null(cached[[m]])) next
+      res <- tryCatch({
+         pc  <- hyd_read_corrected(m, tier, id, "pr")
+         mp  <- prop_monthly(pc, "pr")
+         std_p <- prop_standardize(prop_acc12(mp$tot))
+         if (!isTRUE(std_p$ok))
+            list(excl_reason = paste0("spi_", std_p$reason))
+         else {
+            mq <- data.table::data.table(date = cached[[m]]$dates,
+                                         q = cached[[m]]$qsim)
+            std_q <- prop_standardize(prop_acc12(prop_monthly(mq, "q")$tot))
+            if (!isTRUE(std_q$ok))
+               list(excl_reason = paste0("sri_", std_q$reason))
+            else {
+               mm <- merge(mp[, .(date, spi_in = prop_acc12(tot))],
+                           prop_monthly(mq, "q")[, .(date,
+                                                     sri_in = prop_acc12(tot))],
+                           by = "date")
+               mm <- mm[!is.na(spi_in) & !is.na(sri_in)]
+               if (nrow(mm) < prop_min_months)
+                  list(excl_reason = "insufficient_months")
+               else {
+                  mm[, spi := prop_spi_value(spi_in, std_p$shape, std_p$scale)]
+                  mm[, sri := prop_spi_value(sri_in, std_q$shape, std_q$scale)]
+                  lg <- prop_lag(mm$spi, mm$sri)
+                  if (is.na(lg$r)) list(excl_reason = "no_valid_lag")
+                  else data.table::data.table(
+                     catchment = id, model = m,
+                     L_model = lg$L, corr_at_L = round(lg$r, 3),
+                     L_obs = observed_lags[catchment == id, L_obs],
+                     delta_lag = abs(lg$L -
+                        observed_lags[catchment == id, L_obs]),
+                     reproduced = abs(lg$L -
+                        observed_lags[catchment == id, L_obs]) <=
+                        prop_band_months,
+                     n_months = nrow(mm),
+                     mean_abs_sri_spi = round(mean(abs(mm$sri - mm$spi)), 3))
+               }
+            }
+         }
+      }, error = function(e) list(excl_reason = paste("error:",
+                                                     conditionMessage(e))))
+      if (!is.null(res$excl_reason)) {
+         excl[[length(excl) + 1L]] <- data.table::data.table(
+            module = "PROP_10", catchment = id, model = m,
+            reason_code = res$excl_reason, detail = NA_character_)
+      } else {
+         lag_rows[[n_row <- n_row + 1L]] <- res
+      }
+   }
+   if (i %% 20 == 0) cat("  ...", i, "of", nrow(roster), "\n")
+}
+
+prop_lags <- data.table::rbindlist(lag_rows, use.names = TRUE)
+data.table::fwrite(prop_lags,
+                   file.path(prop_output_dir, "prop_model_lags.csv"))
+excl_dt <- data.table::rbindlist(excl, use.names = TRUE, fill = TRUE)
+if (nrow(excl_dt)) {
+   data.table::fwrite(excl_dt,
+                      file.path(hyd_project_root, "data_processed", "logs",
+                                "PROP_10_exclusions.csv"))
+}
+cat("model-lag rows:", nrow(prop_lags), "| exclusions:", nrow(excl_dt), "\n")
+```
+
+## 6. Per-model scores + the H3 verdict (pre-registration section 4)
+
+```{r h3, eval=TRUE}
+# per-model reproduction share over the frozen roster
+scores <- prop_lags[, .(prop_share = round(mean(reproduced), 3),
+                        n_catchments = .N,
+                        mean_abs_sri_spi = round(mean(mean_abs_sri_spi), 3)),
+                    by = model]
+# supporting evidence: KS test of each model's lag distribution vs observed
+obs_dist <- observed_lags$L_obs
+ks_p <- vapply(scores$model, function(m) {
+   suppressWarnings(stats::ks.test(prop_lags[model == m, L_model],
+                                   obs_dist)$p.value)
+}, numeric(1))
+scores[, ks_p_obs_dist := round(ks_p, 4)]
+
+# falsifying clause 3: does mean-flow (forcing) selection find propagation?
+qed_rank <- data.table::fread(file.path(hyd_qed_dir,
+                                        "model_ranking_overall.csv"))
+qed_rank[, forcing_rank := seq_len(.N)]
+cmp3 <- merge(qed_rank[, .(model, forcing_rank)], scores, by = "model")
+rho_h3 <- suppressWarnings(stats::cor(cmp3$forcing_rank, cmp3$prop_share,
+                                      method = "spearman"))
+
+c1 <- all(scores$prop_share >= prop_h3_share_min)
+c2 <- (max(scores$prop_share) - min(scores$prop_share)) < prop_h3_spread_max
+c3 <- !is.na(rho_h3) && rho_h3 > prop_h3_rho_min
+verdict <- if (c1 && c2 && c3) "FALSIFIED (mean-flow selection suffices)" else
+                              "H3 STANDS"
+
+data.table::fwrite(scores, file.path(prop_output_dir,
+                                     "prop_model_scores.csv"))
+
+writeLines(c(
+   "# H3 verdict -- drought-propagation reproduction",
+   "",
+   paste0("**Date:** ", format(Sys.time())),
+   paste0("**Rule (pre-registered 18 Nov 2026, PROP_PRE_REGISTRATION.md sec 4):** ",
+          "H3 falsified iff (1) all models prop_share >= ", prop_h3_share_min,
+          ", (2) spread < ", prop_h3_spread_max,
+          ", (3) Spearman(forcing rank, prop_share) > ", prop_h3_rho_min, "."),
+   "",
+   paste0("**Clauses: (1) ", c1, " | (2) ", c2, " | (3) ", c3,
+          " | rho(force,prop) = ", sprintf("%.3f", rho_h3), "**"),
+   paste0("**Model prop_share range: ",
+          sprintf("%.2f", min(scores$prop_share)), " - ",
+          sprintf("%.2f", max(scores$prop_share)), "**"),
+   "",
+   paste0("**Verdict: ", verdict, "**"),
+   "",
+   "Artefact diagnostic mean|SRI-SPI| is reported per model; a value near",
+   "0.013 signals the Machhar-type too-tight coupling artefact and is NEVER",
+   "used in the ranking.",
+   "",
+   paste0("Catchments: ", nrow(roster), " frozen | lag rows: ",
+          nrow(prop_lags), " | exclusions: ", nrow(excl_dt))),
+   file.path(prop_output_dir, "h3_verdict.md"))
+cat("H3:", verdict, "| clauses:", c1, c2, c3, "| rho =", round(rho_h3, 3), "\n")
+print(scores[order(-prop_share)])
+```
+
+## Take-away
+
+- `prop_model_lags.csv` -- per model x catchment propagation lags + the
+  reproduction flag against the FROZEN band.
+- `prop_model_scores.csv` -- per-model reproduction share, KS p-values
+  against the observed inter-catchment lag distribution, artefact diagnostic.
+- `h3_verdict.md` -- the contract file for the paper's H3 results section.
+- If the mean|SRI-SPI| diagnostic hovers near 0.013 for a model, that model's
+  SPI-SRI near-identity is a coupling artefact -- flag it, never reward it.
