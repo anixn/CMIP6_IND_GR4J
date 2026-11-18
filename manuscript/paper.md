@@ -105,6 +105,24 @@ Two mechanistic observations from the metric layer, reported as findings (not tu
 - On ephemeral catchments, CMIP-driven GR4J keeps baseflow running where the observed stream nearly dries up (simulated 10th-percentile flow ≈ 7× observed; simulated series never fall below the observed Q90 threshold → dry-spell bias −100%), while underestimating mean flow on the same catchments. Whole-flow KGE is nearly blind to this; the low-flow metrics are not — the empirical basis of the divergence.
 - Observed SPI-12→SRI-12 propagation lags (frozen, 167 catchments) concentrate at 0–1 months (median 1; 150/167), with the mean |SRI−SPI| diagnostic ≈ 0.4–0.7 — far from the ≈0.013 Machhar-type coupling-artefact signature, confirming the observed benchmark is fit for the H3 comparison.
 
+### 5.2 H2 verdict: GR4J vs GR6J structural divergence (observed forcings, base case)
+
+GR6J was calibrated under the identical-treatment rule (192 catchments calibrated under both structures; median validation KGE 0.527 vs GR4J 0.543, paired Wilcoxon p = 0.45 — the structures are comparable at the whole-flow level, so the low-flow comparison is the informative one). Low-flow metrics were computed for both structures on observed forcings (172 paired catchments, evaluation window 2001–2014).
+
+**H2 STANDS** (verdict file: `data_processed/gr6j/h2_verdict.md`). The divergence is material and **structured by aridity** exactly as the hypothesis anticipated, but with a direction that must be reported, not moralized:
+
+| tercile | metric | median div (GR6J − GR4J) | n |
+|---|---|---|---|
+| dry | mam7_bias | −449 pp | 29 |
+| dry | q95_bias | −111 pp | 7 |
+| dry | lf_volume_bias | +158 pp | 8 |
+| wet | lf_volume_bias | +52 pp | 34 |
+| wet | mam7_bias | −47 pp | 51 |
+| intermediate | lf_volume_bias | +32 pp | 36 |
+| wet/intermediate | q95_bias | −12 / +13 pp | 32 / 31 |
+
+logNSE is **not** materially divergent anywhere — the structures differ in *where* and *how much* water they leave in the dry season, not in overall log-skill. GR6J's exponential store produces substantially lower 7-day minima (mam7) in the dry tercile (negative div = GR6J smaller), while overestimating low-flow volume (positive lf_volume div) in wet and intermediate terciles. **Per the pre-registered guardrail this is quantified divergence, not a superiority claim**: whether GR6J's drier dry-season behaviour is more faithful on any given catchment is an out-of-sample question the SSP-projection leg (14 GCMs × 4 SSPs) will carry forward, and per H2's falsification rule the structural axis cannot be dropped from Objective 4.
+
 ## 6. Limitations
 
 Single members only (no internal-variability spread). GR4J/GR6J parameters calibrated on observed forcings — transfer to model climates assumes structural stationarity (tested via O2/O4 interactions). Daily timing skill vs free-running models is inherently bounded; seasonal and distributional low-flow metrics complement daily KGE. **Abstraction/anthropogenic modulation is not modelled**: peninsular hard-rock basins with heavy pumping mean naturalized low-flow projections translate into water-scarcity statements only with caution — the anthropogenic-drought phase (roadmap Year 4, using CAMELS-IND regulation attributes) addresses this and is flagged here, not promised.
