@@ -1,0 +1,5 @@
+FREEZE: observed propagation lags frozen 2026-11-18 10:55:16
+roster attempted : 192
+frozen           : 167
+excluded         : 25 (data_processed/logs/PROP_00_exclusions.csv)
+rule: |L_model - L_obs| <= 1 month = reproduced (PROP_PRE_REGISTRATION.md sec 3)
