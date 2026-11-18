@@ -1,0 +1,16 @@
+metric,arid_tercile,n,median_div,mad_div,wilcoxon_p
+dry_spell_bias,intermediate,36,0,82.472,0.294
+lf_volume_bias,intermediate,36,31.634,425.462,0.4414
+logNSE,intermediate,59,-0.011,0.127,0.4481
+mam7_bias,intermediate,47,-29.811,288.689,0.2579
+q95_bias,intermediate,31,12.561,383.897,0.8092
+dry_spell_bias,wet,34,0,149.431,0.9879
+lf_volume_bias,wet,34,51.698,138.333,0.1087
+logNSE,wet,60,-0.026,0.115,0.0969
+mam7_bias,wet,51,-46.99,276.614,0.3181
+q95_bias,wet,32,-11.937,236.843,0.3038
+logNSE,dry,53,0.046,0.297,0.4103
+mam7_bias,dry,29,-449.463,1565.708,0.0655
+dry_spell_bias,dry,8,23.011,34.117,0.1003
+lf_volume_bias,dry,8,157.893,398.491,0.3828
+q95_bias,dry,7,-111.235,766.081,0.1094
