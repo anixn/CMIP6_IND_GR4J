@@ -12,9 +12,15 @@ The science question: *Which CMIP6 models are fit for low-flow and drought proje
 over Peninsular India — and how much does the answer depend on the hydrological model
 and the bias correction?*
 
-Status: `paper.md` (draft v0.1) is ~60% complete. The missing 40% is (a) the low-flow
-metric layer, (b) the GR6J structural axis, (c) the drought-propagation selection test.
-The SSP projections are the demonstration, not the product.
+**Two-track design (fixed 18 Nov 2026).** Track A (substrate, ours): own QED-corrected
+CMIP6 series (14 hybrid-shortlisted GCMs × 4 SSPs incl. ssp370) → GR4J/GR6J → low-flow
+projections. Track B (benchmark, theirs): CAMELS-IND-Proj (Zenodo 21775597) is used
+ONLY as the audited object of H5 — never as substrate, never as input to our models.
+
+Status: `paper.md` (draft v0.2) frames the objective and the prior-art differentiation.
+The missing results are (a) the low-flow metric layer, (b) the GR6J structural axis,
+(c) the drought-propagation selection test. The SSP projections are the demonstration,
+not the product. Portfolio plan: `research_plan/PAPER_PORTFOLIO.md` (3–4 papers).
 
 ## Non-negotiable scientific guardrails
 
@@ -70,9 +76,28 @@ The SSP projections are the demonstration, not the product.
   catchments, plus historical-per-GCM streamflow and forcings. Confidence flags exist
   for a subset of catchments (239 per the project brief; details in the dataset's
   data-description PDF — verify against the actual downloaded files).
-- **CMIP6**: 22 all-variable models for forcing selection; 14 shortlisted for SSP runs.
+- **CMIP6**: 22 all-variable models for forcing selection; 14 shortlisted for SSP runs
+  (hybrid forcing + discharge rank, `data_processed/hyd/model_shortlist_final.csv`).
+  SSP plan: **ssp126, ssp245, ssp370, ssp585** (AR6 core matrix; ssp370 added 18 Nov
+  2026 for drought-envelope completeness and CAMELS-IND-Proj comparability).
 - GR4J status: calibration median KGE 0.80, validation median 0.54 across 192
   catchments.
+
+## Prior-art positioning (differentiation anchors — cite and differentiate, never ignore)
+
+| Group / product | What they own | Why our lane survives |
+|---|---|---|
+| India Drought Monitor + **Drought Atlas of India** (Chuphal et al. 2024, Sci. Data; IITGN Water & Climate Lab) + bias-corrected CMIP6 South Asia (Mishra et al. 2020, Sci. Data) | Meteorological/agricultural drought monitoring at 0.05°; coarse-scale bias-corrected CMIP6 | No streamflow drought at catchment scale; their bias correction is not catchment-tuned, not seasonally stratified, not hydrologically evaluated, not out-of-sample ranked |
+| **CAMELS-IND** (Mangukiya et al. 2025, ESSD) + **CAMELS-IND-Proj** (Singh et al. 2026, Zenodo 21775597; 13 GCMs × 4 SSPs, LSTM) + MARRMoT adequacy benchmark (Mangukiya et al. 2026, WRR) | Datasets, regional LSTM projections, model-adequacy benchmarking | No low-flow-aware analysis of their own product yet; LSTM dry tail unaudited; we are the first critical process-based user (H5). Their forcings inherit Mishra 2020 bias correction — another reason they must never be our substrate |
+| **Sharma, Barbhuiya & Gupta 2026** (Hydrol. Process. 40(3), e70476; IIT Mandi) — closest prior art | India-wide future streamflow, 4 structures (MILC/GR4J/HBV/HYMOD), 12 GCMs, 128 basins | No GR6J, no low-flow-specific selection, no forcing-vs-low-flow rank-divergence test, no propagation-time selection, no uncertainty decomposition |
+| Tiwary & Mondal 2026 (EGU abstract) | Historical Q7min trends on 55 minimally-regulated CAMELS-IND catchments | Historical description only; our work is projections + selection + uncertainty |
+
+## Roadmap mapping (5-year Low-Flow & Drought programme, `Low-Flow-Profile/`)
+
+This repository is the **Year-1/2 core of Phase 2** (national low-flow climatology &
+projections) and the method foundation for Phase 3 (ML low-flow forecasting). Year-4
+(anthropogenic drought, e-flow exceedance) enters later via CAMELS-IND regulation
+attributes — flagged as a limitation in the current paper, not promised in it.
 
 ## Conventions
 

@@ -49,7 +49,7 @@ For each model × catchment × period × structure:
    **does mean-flow/forcing selection miss propagation skill?** Report the overlap
    explicitly (which well-ranked models fail propagation, which poorly-ranked models
    pass).
-3. Project propagation-time change under SSP1-2.6 / 2-4.5 / 5-8.5 for the 14
+3. Project propagation-time change under SSP1-2.6 / 2-4.5 / 3-7.0 / 5-8.5 for the 14
    shortlisted models: sign, magnitude, and model agreement.
 
 Outputs: `data_processed/prop/propagation_time_by_model.csv`,

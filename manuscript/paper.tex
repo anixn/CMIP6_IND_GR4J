@@ -1,11 +1,11 @@
 % ============================================================
-% paper.tex -- draft manuscript (v0.1, 17 November 2026)
+% paper.tex -- draft manuscript (v0.2, 18 November 2026)
 % Compile with TinyTeX:  tinytex::latexmk("manuscript/paper.tex")
-% Status: METHODS DOCUMENTATION DRAFT. The literature survey is not yet
-%         done; every point needing real citations is marked \todo{}.
+% Status: objective framed; methods specified; historical leg complete.
+%         Points needing the real literature survey are marked \todo{}.
 % ============================================================
 \documentclass[11pt,a4paper]{article}
-\usepackage[margin=2.4cm]{geometry}
+\usepackage[margin=2.3cm]{geometry}
 \usepackage[T1]{fontenc}
 \usepackage[utf8]{inputenc}
 \usepackage{booktabs}
@@ -13,181 +13,213 @@
 \usepackage{xcolor}
 \usepackage[hidelinks]{hyperref}
 \usepackage{caption}
+\usepackage{longtable}
+\usepackage{array}
 
 \newcommand{\todo}[1]{\textcolor{red}{[TODO: #1]}}
 
 \title{\textbf{A two-stage framework for selecting CMIP6 Earth-system models\\
-for catchment-scale hydrological application over Peninsular India}\\
-\large Empirical quantile mapping onto CAMELS-IND forcings, and a GR4J-based
-discharge evaluation for out-of-sample model shortlisting}
-\author{Ankit Deshmukh\thanks{Draft v0.1 -- methods documentation. Objective
-statement and literature survey pending (Section~\ref{sec:todo}).}}
-\date{17 November 2026}
+for catchment-scale low-flow and drought projection over Peninsular India}\\
+\large Empirical quantile mapping onto CAMELS-IND forcings, GR4J/GR6J-based
+hydrological evaluation, and uncertainty decomposition for out-of-sample
+model shortlisting}
+\author{Ankit Deshmukh\thanks{Draft v0.2 -- objective framed 18 November 2026.
+Literature survey pending (Section~\ref{sec:todo}).}}
+\date{18 November 2026}
 
 \begin{document}
 \maketitle
 
 \begin{abstract}
-\noindent
-Earth-system models participating in CMIP6 differ strongly in how
-realistically they reproduce the hydro-climate of Peninsular India, yet
-scenario-driven catchment water-availability studies typically use model
-ensembles selected arbitrarily or inherited from other regions. We develop a
-reproducible two-stage model-selection framework over the 472 CAMELS-IND
-catchments. Stage one bias-corrects daily CMIP6 precipitation and
-temperature (1981--2014, 22 models with all three required variables) onto
+\noindent Scenario-driven water-availability and drought studies over Indian
+catchments depend on which CMIP6 models feed the hydrological analysis, yet
+model selection is usually arbitrary or inherited from global assessments.
+We develop a reproducible \emph{two-stage, low-flow-aware model-selection
+framework} over the 472 CAMELS-IND catchments. Stage one bias-corrects daily
+CMIP6 precipitation and temperature (1981--2014, 22 all-variable models) onto
 catchment-mean forcings with seasonal empirical quantile mapping, and ranks
 models on \emph{out-of-sample} forcing skill (fit 1981--2000, score
 2001--2014). Stage two drives a lumped hydrological model (GR4J, calibrated
-per catchment on observed discharge) with each bias-corrected series and
-ranks models by how realistically the resulting \emph{discharge} matches
-observed flows. A hybrid of the two rankings yields a defensible 14-model
-shortlist spanning the CMIP6 equilibrium-climate-sensitivity range
-(1.8--5.7\,K) for future SSP1-2.6/SSP2-4.5/SSP5-8.5 water-availability and
-drought analyses. Calibration of GR4J across 192 gauged catchments reaches
-a median calibration Kling--Gupta efficiency of 0.80 and out-of-sample
-(validation) median of 0.54. We document the honest handling of model
-gaps (365-day calendars), extrapolation flagging, and the limits of daily
-discharge skill for free-running climate models. \todo{rewrite abstract
-once the final objective is formulated; add headline future-projection
-result when SSP runs complete}
+per catchment on observed discharge; calibration median KGE 0.80,
+out-of-sample median 0.54 across 192 catchments) with each bias-corrected
+series and ranks models by how realistically simulated \emph{discharge}
+matches observed flows. The pilot finding that forcing-skill and
+discharge-skill ranks diverge (Spearman $\rho=0.14$) motivates the central
+hypothesis: model selection for drought projection must be low-flow-aware.
+We specify the extension to a five-metric low-flow layer, a GR4J--GR6J
+structural-uncertainty axis, a drought-propagation-time selection test, a
+GCM $\times$ structure $\times$ bias-correction variance decomposition, and a
+process-based low-flow audit of the CAMELS-IND-Proj LSTM projections. A
+hybrid shortlist of 14 models spanning the CMIP6 ECS range
+($\approx$1.8--5.7\,K) is fixed for projections under the four SSPs of the
+AR6 core scenario matrix (ssp126, ssp245, ssp370, ssp585).
+\todo{rewrite abstract with H1--H5 verdict numbers once analyses land}
 \end{abstract}
 
-\section{Introduction}
-\label{sec:intro}
+\section{Objective framing}
+\label{sec:objective}
 
-Scenario-driven water-availability assessments over Indian catchments face a
-selection problem that is rarely treated explicitly: which CMIP6 Earth-system
-models should feed the hydrological analysis? Existing practice often
-inherits ensembles from global assessments \todo{cite examples -- real
-literature survey needed}. Three gaps motivate this work:
+\textbf{Primary objective.} Determine \emph{which CMIP6 models are fit for
+low-flow and drought projection over Peninsular India --- and how much that
+answer depends on the hydrological model structure and the bias-correction
+design} --- through an out-of-sample, hydrologically-evaluated selection
+framework, and deliver the resulting projection engine as the core of a
+national low-flow/drought programme.
 
-\begin{enumerate}
-\item \textbf{Regional bias structure.} Persistent precipitation biases of
-CMIP6 models in the AR6 reference regions covering South Asia
-(EAS, WSB, ESB) make raw model output unsuitable for catchment water-balance
-studies \todo{cite AR6 WG1 Ch.\,8 / literature -- survey pending}. This
-connects to open problem \textbf{C9} (regional climate biases and
-explainable downscaling) of the author's research agenda.
-\item \textbf{Hydrological (not just meteorological) skill.} A model can
-reproduce rainfall statistics yet fail to generate realistic runoff, because
-discharge integrates seasonality, soil-moisture dynamics and evaporative
-demand. Model selection should therefore include a hydrological test, not
-only a forcing test.
-\item \textbf{Global-South benchmarking.} Lumped conceptual models remain the
-baseline that new (e.g., deep-learning) approaches must beat when local data
-are sparse \todo{connect to C21 (Global-South data equity and benchmarking);
-survey pending}. Establishing a transparent GR4J baseline over CAMELS-IND
-contributes this reference point.
-\end{enumerate}
+Sub-objectives, each with a pre-registered decision rule (negative results
+are reported as results):
 
-\noindent This manuscript is deliberately structured as a
-\emph{methods-and-workflow documentation}: the pipeline is fully
-reproducible (Section~\ref{sec:methods}), preliminary results are reported
-from the completed historical leg (Section~\ref{sec:results}), and the
-future-scenario leg is specified but not yet executed
-(Section~\ref{sec:todo}).
+\begin{table}[h]
+\centering\small
+\caption{Objectives, hypotheses and decision rules.}
+\begin{tabular}{p{0.4cm}p{4.6cm}p{2.6cm}p{7.2cm}}
+\toprule
+\# & Objective & Hypothesis & Decision rule \\
+\midrule
+O1 & Low-flow metric layer: rank models on low-flow skill; test divergence
+from forcing skill & H1 forcing rank $\neq$ low-flow rank & Fails if pooled
+Spearman $\rho>0.6$ $\rightarrow$ framework collapses to one stage \\
+O2 & GR6J structural axis: GR4J--GR6J divergence stratified by
+aridity/storage & H2 structures differ materially & Fails if
+indistinguishable across catchment types \\
+O3 & Drought-propagation selection (SPI-12$\rightarrow$SRI-12 lag,
+pre-registered band) & H3 mean-flow selection misses propagation skill &
+Fails if all 22 models reproduce observed propagation within band \\
+O4 & Uncertainty decomposition: GCM $\times$ structure $\times$ EQM tail
+policy on low-flow projection variance & H4 GCM dominates; structure
+$\geq$5\% matters & Fails if structure share $<$5\% everywhere (publishable
+negative result) \\
+O5 & C21 benchmark: audit CAMELS-IND-Proj LSTM projections against
+GR4J/GR6J low-flow skill & H5 LSTM does not uniformly win at low flows &
+If LSTM dominates everywhere, publish as benchmark confirmation \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\textbf{Two-track design (fixed 18 Nov 2026).} \emph{Track A (substrate,
+ours):} own QED-corrected CMIP6 series (14 hybrid-shortlisted GCMs
+$\times$ 4 SSPs) $\rightarrow$ GR4J/GR6J $\rightarrow$ low-flow projections.
+\emph{Track B (benchmark, theirs):} CAMELS-IND-Proj is used \emph{only} as
+the audited object of O5/H5 --- never as substrate, never as input to our
+models. Rationale: their forcings inherit the coarse-scale Mishra et
+al.~(2020) bias correction (no catchment tuning, no tail-policy axis ---
+using them would kill O4), and analysis-only papers of another group's
+product compete with the producers on their home turf. Method-level
+contributions survive scooping; data-application papers do not.
+
+\section{Prior-art positioning}
+\label{sec:priorart}
+
+\begin{table}[h]
+\centering\small
+\caption{Adjacent groups and the surviving novelty lane.}
+\begin{tabular}{p{4.6cm}p{4.4cm}p{7.2cm}}
+\toprule
+Group / product & What they own & Why our lane survives \\
+\midrule
+India Drought Monitor + Drought Atlas of India (Chuphal et al.~2024, Sci.\
+Data; IITGN); bias-corrected CMIP6 South Asia (Mishra et al.~2020, Sci.\
+Data) & Meteorological/agricultural drought monitoring at 0.05$^\circ$
+(1901--2020); coarse-scale bias-corrected CMIP6 & No streamflow drought at
+catchment scale; bias correction not catchment-tuned, not seasonally
+stratified, not hydrologically evaluated, not out-of-sample ranked \\
+CAMELS-IND (Mangukiya et al.~2025, ESSD) + CAMELS-IND-Proj (Singh et
+al.~2026, Zenodo 21775597) + MARRMoT adequacy benchmark (Mangukiya et
+al.~2026, WRR) & Datasets; regional LSTM projections (13 GCMs $\times$ 4
+SSPs); model-adequacy benchmarking & No low-flow-aware analysis of their own
+product yet; LSTM dry tail unaudited; we are the first critical
+process-based user. GR4J is in their 5-model sufficient set --- independent
+support for our structural choice \\
+Sharma, Barbhuiya \& Gupta 2026 (Hydrol.\ Process.\ 40(3) e70476; IIT
+Mandi) --- closest prior art & India-wide future streamflow; 4 structures
+(MILC/GR4J/HBV/HYMOD); 12 GCMs; 128 basins & No GR6J, no low-flow-specific
+selection, no forcing-vs-low-flow divergence test, no propagation-time
+selection, no uncertainty decomposition \\
+India Drought Atlas operational ecosystem & Monitoring infrastructure with
+institutional appetite & Our streamflow-drought layer is a candidate
+addition to that ecosystem, not a competitor to it \\
+Tiwary \& Mondal 2026 (EGU abstract) & Historical Q7min trends, 55
+minimally-regulated catchments & Historical description; ours is projections
++ selection + uncertainty \\
+\bottomrule
+\end{tabular}
+\end{table}
 
 \section{Data}
 \label{sec:data}
 
-\subsection{CAMELS-IND catchments and observations}
-The CAMELS-IND dataset provides daily catchment-mean meteorological forcings
-(precipitation, maximum and minimum temperature), observed streamflow
-(m\,s$^{-1}$ \todo{unit check: m$^3$/s}), and catchment attributes for 472
-catchments in Peninsular India over 1981--2014 \todo{cite the CAMELS-IND
-dataset paper -- survey pending}. Forcing availability is complete for all
-12,418 days in the study period; streamflow availability varies by gauge.
-Catchment area (\texttt{cwc\_area}, km$^2$) and outlet latitude
-(\texttt{cwc\_lat}) are taken from the topography attribute file.
-
-\subsection{CMIP6 historical output}
-Daily precipitation (\texttt{pr}) and maximum/minimum near-surface
-temperature (\texttt{tasmax}, \texttt{tasmin}) were retrieved for 24 CMIP6
-models over the Indian domain (1981--2014). Two models (CESM2, IITM-ESM)
-provide precipitation only and were excluded; \textbf{22 models} carry all
-three variables and form the selection pool. The HadGEM3-GC31-MM 360-day
-calendar was handled by mapping its invalid 29/30 February to missing
-values. Single first members (\texttt{r1i1p1f1} or closest available) are
-used; ensemble spread is not assessed \todo{limitation; survey on large
-ensembles pending}.
+\begin{itemize}
+\item \textbf{CAMELS-IND} (Mangukiya et al.~2025, ESSD 17:461; Zenodo
+14999580): daily catchment-mean forcings (pr, tasmax, tasmin), observed
+streamflow, 211 attributes, 472 catchments, 1981--2014 (12,418 days;
+forcings complete). Area (\texttt{cwc\_area}, km$^2$) and latitude
+(\texttt{cwc\_lat}) from the topography file.
+\item \textbf{CMIP6 historical}: daily \texttt{pr}/\texttt{tasmax}/
+\texttt{tasmin}, 24 models over the Indian domain; CESM2 and IITM-ESM
+precipitation-only $\rightarrow$ excluded; 22 all-variable models form the
+selection pool. HadGEM3-GC31-MM 360-day calendar handled (invalid Feb
+29/30 $\rightarrow$ NA). Single members.
+\item \textbf{CMIP6 scenarios (Track A)}: hybrid-shortlisted 14 models
+$\times$ \textbf{4 SSPs (ssp126, ssp245, ssp370, ssp585)} $\times$ near
+(2015--2040), mid (2041--2060), long (2081--2100). ssp370 added 18 Nov 2026
+to complete the AR6 core scenario matrix and align with CAMELS-IND-Proj's
+4-SSP design.
+\item \textbf{CAMELS-IND-Proj} (Singh et al.~2026, Zenodo 21775597, CC BY
+4.0; EcoHydro Lab IIT Roorkee): daily LSTM streamflow 2015--2100, 13 GCMs
+$\times$ 4 SSPs, historical-per-GCM runs and forcings; $\sim$11.3\,GB.
+\textbf{Track B only.} Confidence flags exist for a subset of catchments
+(239 per the project brief) --- \emph{unverified on the public record};
+the number and flag semantics must be verified against the downloaded files
+before any use. \todo{survey}
+\end{itemize}
 
 \section{Methods}
 \label{sec:methods}
 
-\subsection{Catchment tiering}
-Catchments were tiered by forcing completeness over 1981--2014:
-Tier~1 ($\ge$70\% valid days; 180 catchments), Tier~2 ($\ge$30\%; 62), and
-Tier~3 ($<$10 years; 230), which is excluded but logged. Every exclusion is
-recorded in a machine-readable inventory; nothing is dropped silently.
+\subsection{Historical leg (complete)}
+Tiering by forcing availability (Tier~1 $\geq$70\%, 180; Tier~2 $\geq$30\%,
+62; Tier~3 excluded, 230 --- all logged); area-weighted catchment-mean
+aggregation; seasonal EQM (DJF/MAM/JJA/SON, bins $\geq$300 days with annual
+fallback --- 331 of 15,972 fits; tie-collapsed CDF; tail policies
+pr=constant / T=linear for historical evaluation; every value flagged and
+flags counted); out-of-sample forcing ranking (fit 1981--2000, score
+2001--2014; KGE/NSE/PBIAS composite; natural break after rank 14);
+GR4J leg (airGR; Oudin PET;
+$Q[\mathrm{mm\,d^{-1}}] = Q[\mathrm{m^3\,s^{-1}}]\times 86.4/A[\mathrm{km^2}]$;
+warm-up 1981; calibrate 1982--2000, Michel local search on $1-$KGE; validate
+out-of-sample 2001--2014 with manual PBIAS; $<$3,650 valid Q-days $\rightarrow$
+skip and log); CMIP-driven discharge evaluation of all 22 corrected series
+against observed 2001--2014 discharge. Leap-day gaps of 365-day-calendar
+models filled conservatively (pr$\rightarrow$0, T$\rightarrow$interpolated),
+counted in \texttt{n\_gap\_filled}. \todo{cite Perrin 2003; Coron 2017;
+Oudin 2005; Michel 1991; full survey pending}
 
-\subsection{Catchment-mean model series}
-Gridded CMIP6 fields were clipped to the Indian boundary and aggregated to
-catchment means with an area-weighted average over the intersecting grid
-cells, producing one daily series per model$\times$variable$\times$catchment
-(66 series files per model).
-
-\subsection{Seasonal empirical quantile mapping (EQM)}
-Empirical quantile mapping is fitted per variable, season (DJF, MAM, JJA,
-SON) and catchment between model and observed 1981--2014 series:
+\subsection{Phase methods (specified; to be executed)}
 \begin{itemize}
-\item quantile bins require $\ge$300 days; seasons failing the threshold
-fall back to the annual fit (331 of 15,972 fits used the fallback);
-\item the empirical CDF is tie-collapsed so that constant model values map
-consistently;
-\item tail policy: precipitation \emph{constant} (clamped to the fitted
-range) for the historical evaluation; temperatures \emph{linear}
-(extrapolated from the edge bin slopes). For future SSP application the
-precipitation policy switches to \emph{linear} to avoid truncating
-intensified extremes \todo{cite QM extrapolation literature -- survey
-pending};
-\item every corrected value carries a flag (\texttt{within\_range} vs.\
-extrapolation method); extrapolated values are counted, never hidden.
+\item \textbf{Low-flow metric layer (O1)}: logNSE, Q95 bias, low-flow volume
+bias (below observed Q90), dry-spell bias, mean annual 7-day minimum bias ---
+2001--2014 only; composite rank after pairwise $\rho>0.9$ de-duplication.
+\item \textbf{GR6J axis (O2)}: GR6J (6 parameters) via airGR, identical
+inputs/windows/warm-up/optimizer as GR4J, calibrated on the same 192
+catchments; divergence \texttt{div = (GR6J$-$GR4J)/GR4J} per model
+$\times$ catchment $\times$ SSP $\times$ metric; stratified by aridity and
+baseflow-index proxy; ANOVA-style structure test.
+\item \textbf{Propagation (O3)}: SPI-12/SRI-12 (gamma fit, fixed convention);
+propagation time = SPI--SRI cross-correlation lag (0--12 months) ---
+\emph{never} inferred from SPI$\approx$SRI near-identity; pre-registered
+tolerance band on observed propagation \emph{before} any model comparison;
+propagation rate = share of SPI$\leq-1$ months followed by SRI$\leq-1$ within
+the window.
+\item \textbf{Decomposition (O4)}: multi-way ANOVA / variance components of
+Q95 change, 7-day min change, low-flow volume change $\sim$ GCM $\times$
+structure $\times$ tail policy, blocking by catchment type; bootstrap CIs
+($\geq$1000 resamples, recorded seed); responses never blended.
+\item \textbf{Benchmark (O5)}: same low-flow metric suite applied to
+CAMELS-IND-Proj historical-per-GCM runs (skill) and 2015--2100 projections
+(projected change); distributions and per-catchment win rates, stratified by
+confidence flag and aridity; the LSTM product is benchmarked, never
+regenerated.
 \end{itemize}
-
-\subsection{Out-of-sample forcing ranking (QED)}
-To avoid in-sample optimism, EQM was fitted on 1981--2000 only and applied
-to 2001--2014; skill against observed catchment forcings was scored
-out-of-sample with KGE, NSE and PBIAS per model$\times$variable, combined
-into a composite rank sum. A natural break after rank 14 (non-overlapping
-out-of-sample KGE between ranks 1--14 and 15--22 for every variable)
-motivated a 14-model shortlist at this stage.
-
-\subsection{GR4J calibration and validation (HYD)}
-GR4J \todo{cite Perrin et al.\ 2003} is run with the \texttt{airGR} package
-\todo{cite Coron et al.\ 2017} at a daily step. Inputs are precipitation and
-potential evapotranspiration computed with the Oudin formula (daily mean
-temperature and latitude) \todo{cite Oudin et al.\ 2005}. Observed
-discharge is converted to model space, $Q[\mathrm{mm\,d^{-1}}] =
-Q[\mathrm{m^3\,s^{-1}}]\times 86.4 / A[\mathrm{km^2}]$.
-
-Per catchment: a 1-year warm-up (1981) precedes the run window (verified:
-\texttt{airGR} discards warm-up indices that overlap the run window);
-GR4J is calibrated on 1982--2000 with the Michel local-search algorithm
-minimising $1-\mathrm{KGE}$ \todo{cite Michel 1991 / airGR design}; and
-evaluated \emph{out-of-sample} on 2001--2014 with KGE, NSE and PBIAS
-(PBIAS computed manually; \texttt{airGR} provides no such criterion).
-Catchments with fewer than 3,650 valid discharge days in the calibration
-window are skipped and logged. \todo{Monte-Carlo (LHS) calibration as in
-the author's regionalization study is an optional robustness check; survey
-pending.}
-
-\subsection{CMIP-driven discharge evaluation}
-Each calibrated parameter set is then driven with each of the 22
-bias-corrected CMIP6 series (1982--2014, same warm-up), and the simulated
-discharge is scored against observed 2001--2014 discharge. Models are ranked
-per catchment on KGE, NSE and $|$PBIAS$|$; rank sums across catchments give
-a composite \emph{discharge ranking}.
-
-\subsection{Hybrid shortlist synthesis}
-The final shortlist combines both rankings (mean of the forcing rank and the
-discharge rank). The two worst discharge performers of the forcing-only
-top-14 (GISS-E2-1-G: discharge rank 21/22; INM-CM5-0: 20/22) are replaced by
-the strongest discharge performers outside it (MPI-ESM1-2-HR: 5/22;
-GFDL-ESM4: 9/22), keeping the shortlist at 14 models while retaining the
-full CMIP6 ECS range (INM-CM4-8 $\approx$1.8\,K to CanESM5
-$\approx$5.7\,K) \todo{confirm ECS values against the literature -- survey
-pending}.
 
 \section{Preliminary results (historical leg, completed)}
 \label{sec:results}
@@ -209,11 +241,10 @@ Validation 2001--2014 (out-of-sample) & 0.54 & 0.43 & 0.43 \\
 \begin{table}[h]
 \centering\small
 \caption{Top of the hybrid model shortlist (full table:
-\texttt{data\_processed/hyd/model\_shortlist\_final.csv}). QED = forcing
-rank, DIS = GR4J discharge rank.}
+\texttt{data\_processed/hyd/model\_shortlist\_final.csv}).}
 \begin{tabular}{clccc}
 \toprule
-Hybrid & Model & QED & DIS & mean volume PBIAS [\%] \\
+Hybrid & Model & QED & DIS & mean PBIAS [\%] \\
 \midrule
 1 & EC-Earth3-Veg-LR & 1 & 3 & $-2.4$ \\
 2 & NorESM2-MM       & 7 & 1 & $-4.3$ \\
@@ -226,84 +257,84 @@ Hybrid & Model & QED & DIS & mean volume PBIAS [\%] \\
 \end{tabular}
 \end{table}
 
-\noindent Key observations:
+\noindent Key observations: forcing and discharge rankings diverge
+(Spearman $\rho=0.14$) --- the empirical wedge motivating O1/H1; absolute
+daily discharge skill is $\approx$0 for \emph{all} models (median KGE
+$-0.05$ to $-0.11$) because CMIP6 historical runs are free-running --- EQM
+corrects distributions, not timing, so volume bias and relative ordering are
+the interpretable signals \todo{support with QM-limits literature}; volume
+bias standouts: NorESM2-MM $-4.3$\%, HadGEM3-GC31-MM $+0.4$\%, MIROC6
+$+3.9$\%, MPI-ESM1-2-HR $+5.3$\%; extrapolation exposure 0.05\% (forcing)
+and 0.13\% (discharge evaluation), expected to rise in future windows
+(motivating the linear pr tail policy); GISS-E2-1-G and INM-CM5-0 dropped
+from the forcing-only top-14 (discharge ranks 21 and 20 of 22),
+MPI-ESM1-2-HR and GFDL-ESM4 added (5 and 9 of 22) --- the first application
+of the framework's own principle.
 
-\begin{itemize}
-\item Agreement between the forcing and discharge rankings is weak
-(Spearman $\rho = 0.14$), confirming that hydrological evaluation adds
-information that forcing skill alone does not capture.
-\item Absolute daily discharge skill is $\approx$0 for \emph{all} models
-(median KGE $-0.05$ to $-0.11$). This is expected: CMIP6 historical runs are
-free-running, so their daily weather is not phase-synchronised with
-observations; quantile mapping corrects distributions, not timing. Volume
-bias (PBIAS) and the \emph{relative} ordering remain the interpretable
-signals \todo{support with literature on QM limits for unpaired series --
-survey pending}.
-\item Models with the smallest discharge volume bias
-(NorESM2-MM $-4.3$\%, HadGEM3-GC31-MM $+0.4$\%, MIROC6 $+3.9$\%,
-MPI-ESM1-2-HR $+5.3$\%) demonstrate that distribution-corrected series can
-reproduce catchment water balances well even where daily timing skill is
-bounded.
-\item Extrapolation exposure is small but non-negligible: 0.05\% of scored
-forcing values and 0.13\% of discharge-evaluation values were flagged as
-tail extrapolations; future (warmer) windows will raise this and are the
-reason for the \emph{linear} precipitation tail policy.
-\end{itemize}
+\section{Limitations}
+\label{sec:limits}
 
-\section{Discussion, limitations and planned work}
+Single members only (no internal-variability spread). GR4J/GR6J parameters
+calibrated on observed forcings --- transfer to model climates assumes
+structural stationarity (tested via O2/O4 interactions). Daily timing skill
+vs free-running models is inherently bounded; seasonal and distributional
+low-flow metrics complement daily KGE. \textbf{Abstraction/anthropogenic
+modulation is not modelled}: peninsular hard-rock basins with heavy pumping
+mean naturalized low-flow projections translate into water-scarcity
+statements only with caution --- the anthropogenic-drought phase (roadmap
+Year~4, using CAMELS-IND regulation attributes) addresses this and is
+flagged here, not promised.
+
+\section{Publication portfolio and timeline}
+\label{sec:portfolio}
+
+Planned as 3--4 papers --- full objectives, data dependencies, target
+journals and quarter-level timeline in
+\texttt{research\_plan/PAPER\_PORTFOLIO.md}. Summary:
+
+\begin{table}[h]
+\centering\small
+\caption{Paper portfolio.}
+\begin{tabular}{p{1.2cm}p{6.8cm}p{2.6cm}p{4.6cm}}
+\toprule
+Paper & Core content & Target & Status \\
+\midrule
+P1 (this repo) & Low-flow-aware CMIP6 selection + GR6J axis + propagation +
+decomposition (O1--O4) & WRR / HESS & historical leg done; SSP + phases
+pending \\
+P2 & CAMELS-IND-Proj low-flow audit (O5) --- first process-based critical
+user & HESS / Sci.\ Data companion & download pending \\
+P3 & National streamflow-drought climatology \& low-flow threshold framework
+for Peninsular India & WRR / JoH & engine = P1 \\
+P4 & ML low-flow forecasting / S2S; optional P5 anthropogenic drought \&
+e-flows (Year 4) & HESS / WRR & foundation = P1+P2 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\section{Literature survey TODO}
 \label{sec:todo}
 
-\subsection{Limitations to state honestly}
-Single members only; no evaluation of internal-variability spread.
-GR4J is calibrated on observed forcings -- parameter transfer to
-model climates assumes structural stationarity. Daily timing skill against
-free-running models is inherently bounded; seasonal or distributional
-hydrological metrics (e.g., monthly flow-duration, low-flow/flood
-quantiles) should complement daily KGE in the final analysis. The
-discharge-based ranking uses the same evaluation window as the forcing
-ranking; a fully independent future window will strengthen the synthesis.
-
-\subsection{Planned extensions (SSP leg)}
-For the shortlisted 14 models: download SSP1-2.6, SSP2-4.5 and SSP5-8.5
-daily \texttt{pr}/\texttt{tasmax}/\texttt{tasmin} for near-term
-(2015--2040), mid-term (2041--2060) and long-term (2081--2100) windows;
-apply the historical-fitted EQM with the \emph{linear} precipitation tail
-policy; drive calibrated GR4J to produce future daily discharge ensembles
-per catchment; derive water-availability and drought-relevant indicators
-(e.g., low-flow quantiles, dry-spell statistics) --- connecting to open
-problem \textbf{C2} (compound extremes) of the research agenda.
-
-\subsection{Formulation of the final objective}
-\todo{This is the open item. Candidate framings, to be resolved after the
-literature survey: (i) a methods paper on two-stage GCM selection for
-catchment hydrology; (ii) a projection paper on water availability /
-drought over Peninsular India under SSPs; (iii) a benchmarking paper
-positioning the GR4J baseline for Global-South hydrological ML (C21);
-or a combination. See the open-problem list for anchors C9, C21, C2.}
-
-\subsection{Literature survey TODO list}
-\todo{GR4J and airGR origins; EQM variants and their behaviour on unpaired
-series; CMIP6 Indian-region evaluation studies; CAMELS-IND dataset paper
-and prior applications; KGE/NSE interpretation references; ECS values for
-the shortlisted models; IAHS HELPING decade positioning (Pangaea-style
-data statements).}
+\todo{GR4J/airGR origins; EQM variants on unpaired (free-running) series;
+CMIP6 South-Asia evaluation; CAMELS-IND + CAMELS-IND-Proj dataset papers and
+prior applications; KGE interpretability; ECS values for shortlisted models;
+drought-propagation canon (India: Betwa HSJ 2026 --- verify 80\%/42$\rightarrow$63\%
+figures at camera-ready); Wilby \& Harris 2006 uncertainty ordering; IAHS
+HELPING positioning.}
 
 \section*{Data and code availability}
-The complete workflow is reproducible from R Markdown notebooks
-(\texttt{QED\_00--30}: tiering, aggregation, quantile mapping, ranking;
-\texttt{HYD\_00--30}: input preparation, GR4J calibration, CMIP-driven
-simulation) at \url{https://github.com/anixn/CMIP6_IND_GR4J}. Small result
-tables are tracked in the repository; bulk series are regenerated by the
-notebooks from raw data.
+Reproducible from R Markdown notebooks (\texttt{QED\_00--30},
+\texttt{HYD\_00--30}; phase modules \texttt{LOWFLOW\_*}, \texttt{GR6J\_*},
+\texttt{PROP\_*}, \texttt{DECOMP\_*}, \texttt{BENCH\_*} specified in
+\texttt{AGENTS.md}) at \url{https://github.com/anixn/CMIP6_IND_GR4J}. Small
+result tables are tracked in the repository; bulk series are regenerated by
+the notebooks from raw data.
 
-\begin{thebibliography}{9}
+\begin{thebibliography}{12}
 \bibitem{perrin2003} Perrin, C., Michel, C., Andr\'eassian, V. (2003).
 Improvement of a parsimonious model for streamflow simulation. Journal of
 Hydrology, 279, 275--289.
-\bibitem{coron2017} Coron, L., Thirel, G., Guillaumot, S., Le Moine, N.,
-Andr\'eassian, V. (2017). airGR: an R package. \todo{verify full citation}
-\bibitem{oudin2005} Oudin, L., Hervier, F., Michel, C., Perrin, C.,
-Andr\'eassian, V., Anctil, F., Loumagne, C. (2005). Which potential
+\bibitem{oudin2005} Oudin, L., et al. (2005). Which potential
 evapotranspiration input for a lumped rainfall--runoff model? Journal of
 Hydrology, 303, 290--306.
 \bibitem{eyring2016} Eyring, V., et al. (2016). Overview of the Coupled
@@ -312,11 +343,31 @@ Development, 9, 1937--1958.
 \bibitem{gupta2009} Gupta, H.V., Kling, H., Yilmaz, K.K., Martinez, G.F.
 (2009). Decomposition of the mean squared error and NSE performance
 criteria. Journal of Hydrology, 377, 80--91.
-\bibitem{hargreaves1985} Hargreaves, G.H., Samani, Z.A. (1985). Reference
-crop evapotranspiration from temperature. Applied Engineering in
-Agriculture, 1, 96--99.
+\bibitem{mangukiya2025} Mangukiya, N.K., et al. (2025). CAMELS-IND:
+hydrometeorological time series and catchment attributes for 472 catchments
+in Peninsular India. Earth System Science Data, 17, 461--491.
+\bibitem{chuphal2024} Chuphal, D.S., Kushwaha, A.P., Aadhar, S., Mishra, V.
+(2024). Drought Atlas of India, 1901--2020. Scientific Data, 11, 7.
+\bibitem{mishra2020} Mishra, V., Bhatia, U., Tiwari, A.D. (2020).
+Bias-corrected climate projections for South Asia from CMIP6. Scientific
+Data, 7, 1--13.
+\bibitem{singh2026} Singh, A., Mangukiya, N.K., Sahu, G., Sharma, A. (2026).
+CAMELS-IND-Proj: daily streamflow projections for 472 Peninsular Indian
+catchments under future climate scenarios. Zenodo 21775597, CC BY 4.0.
+\bibitem{mangukiya2026wrr} Mangukiya, N.K., et al. (2026). Benchmarking and
+selecting optimal hydrological models. Water Resources Research,
+2026WR044753.
+\bibitem{sharma2026hp} Sharma, V., Barbhuiya, S., Gupta, V. (2026).
+Projections of future streamflow for India informed by CMIP6 global climate
+models. Hydrological Processes, 40(3), e70476.
+\bibitem{coron2017} Coron, L., et al. (2017). airGR: an R package.
+\todo{verify full citation}
+\bibitem{wilby2006} Wilby, R.L., Harris, I. (2006). A framework for
+assessing uncertainties in climate change impacts: low-flow scenarios for
+the River Thames, UK. Water Resources Research, 42, W02419.
+\todo{verify}
 \end{thebibliography}
-\noindent\todo{Bibliography is a minimal verified core; complete survey
+\noindent\todo{Bibliography is a verified minimal set; complete survey
 pending.}
 
 \end{document}
