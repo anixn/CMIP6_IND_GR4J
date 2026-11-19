@@ -1,0 +1,10 @@
+2026-11-19 14:11:20 | benchmark GCMs with no Track-A counterpart (excluded from the win-rate, logged): NorESM2-LM 
+2026-11-19 14:11:20 | H5 like-for-like GCM intersection (12): ACCESS-CM2,ACCESS-ESM1-5,BCC-CSM2-MR,CanESM5,EC-Earth3,EC-Earth3-Veg-LR,INM-CM4-8,INM-CM5-0,MPI-ESM1-2-HR,MPI-ESM1-2-LR,MRI-ESM2-0,NorESM2-MM 
+2026-11-19 14:30:35 | benchmark GCMs with no Track-A counterpart (excluded from the win-rate, logged): NorESM2-LM 
+2026-11-19 14:30:35 | H5 like-for-like GCM intersection (12): ACCESS-CM2,ACCESS-ESM1-5,BCC-CSM2-MR,CanESM5,EC-Earth3,EC-Earth3-Veg-LR,INM-CM4-8,INM-CM5-0,MPI-ESM1-2-HR,MPI-ESM1-2-LR,MRI-ESM2-0,NorESM2-MM 
+2026-11-19 14:30:35 | GR6J CMIP-driven metric pass found -- BOTH legs of the H5 rule evaluated 
+2026-11-19 14:35:19 | benchmark GCMs with no Track-A counterpart (excluded from the win-rate, logged): NorESM2-LM 
+2026-11-19 14:35:19 | H5 like-for-like GCM intersection (12): ACCESS-CM2,ACCESS-ESM1-5,BCC-CSM2-MR,CanESM5,EC-Earth3,EC-Earth3-Veg-LR,INM-CM4-8,INM-CM5-0,MPI-ESM1-2-HR,MPI-ESM1-2-LR,MRI-ESM2-0,NorESM2-MM 
+2026-11-19 14:35:19 | GR6J CMIP-driven metric pass found -- BOTH legs of the H5 rule evaluated 
+2026-11-19 14:35:19 | H5 verdict: H5 STANDS -- LSTM does not uniformly beat GR4J/GR6J at low flows (metrics where LSTM wins overall: lf_volume_bias, logNSE, mam7_bias, q95_bias, lf_volume_bias, logNSE, mam7_bias, q95_bias) 
+2026-11-19 14:35:22 | LSTM projected low-flow envelope written: 37752 rows across 4 SSPs 

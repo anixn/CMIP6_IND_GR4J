@@ -1,6 +1,5 @@
 ---
-title: "BENCH 10 -- Low-flow evaluation of the LSTM benchmark (H5): LSTM vs GR4J/GR6J"
-subtitle: "Phase 3->5 of the low-flow framework (H5 / Objective 5) -- Track B audit; consumes BENCH_00 caches; parallel module"
+title: "BENCH 10 -- Low-flow evaluation of the LSTM benchmark (H5): LSTM vs GR4J/GR6J"subtitle: "Phase 3->5 of the low-flow framework (H5 / Objective 5) -- Track B audit; consumes BENCH_00 caches; parallel module"
 output:
    html_document:
       css: style_academic.css
@@ -268,7 +267,6 @@ win_vs <- function(m_other, label) {
    cmp[, lstm_better := if (metric[1] == "logNSE")
            value_lstm > value_ta else abs(value_lstm) < abs(value_ta),
        by = .(catchment, metric)]
-   if (!is.null(arid)) cmp <- merge(cmp, arid, by = "catchment", all.x = TRUE)
    cmp[, compared_with := label]
    cmp
 }
@@ -295,6 +293,16 @@ if (have_gr6j) {
 }
 cmp <- cmp_gr4j
 
+# pooled win rates: THE pre-registered decision basis (H5 = "all low-flow
+# metrics on the shared set"; the aridity split below is supporting evidence
+# for the semi-arid/hard-rock claim, not part of the falsification condition)
+win_pooled <- cmp_all[, .(lstm_win_share = round(mean(lstm_better), 3), n = .N),
+                      by = .(compared_with, metric)]
+data.table::fwrite(win_pooled, file.path(bench_output_dir,
+                                         "h5_lstm_win_rates_pooled.csv"))
+print(win_pooled)
+
+# stratified by aridity tercile (reporting evidence; excluded from the rule)
 win_rate <- cmp_all[, .(lstm_win_share = round(mean(lstm_better), 3), n = .N),
                     by = .(compared_with, metric,
                            arid_tercile = if ("arid_tercile" %in% names(cmp_all))
@@ -321,7 +329,9 @@ if (nrow(dup_pairs)) {
 
 # H5 verdict: falsified iff LSTM wins EVERY metric against EVERY structure
 # that has a CMIP-driven pass (GR4J always; GR6J when GR6J_40 has run).
-all_won <- all(win_rate$lstm_win_share > 0.5)
+# The decision basis is the POOLED win rate -- the aridity split is evidence,
+# not part of the pre-registered condition.
+all_won <- all(win_pooled$lstm_win_share > 0.5)
 gr6j_note <- if (have_gr6j) {
    "GR6J leg: EVALUATED (GR6J_40 CMIP-driven metric pass present)."
 } else {
@@ -329,20 +339,20 @@ gr6j_note <- if (have_gr6j) {
 }
 h5_verdict <- if (all_won) {
    paste0("H5 FALSIFIED -- LSTM dominates on all low-flow metrics against ",
-          paste(unique(win_rate$compared_with), collapse = " and "),
+          paste(unique(win_pooled$compared_with), collapse = " and "),
           " (publish as benchmark confirmation, framed as such)")
 } else {
    paste0("H5 STANDS -- LSTM does not uniformly beat ",
-          paste(unique(win_rate$compared_with), collapse = "/"),
-          " at low flows (cells where LSTM wins: ",
-          paste(win_rate[lstm_win_share > 0.5,
-                         paste0(compared_with, ":", metric, ":", arid_tercile)],
-                collapse = ", "), ")")
+          paste(unique(win_pooled$compared_with), collapse = "/"),
+          " at low flows (metrics where LSTM wins overall: ",
+          paste(unique(win_pooled[lstm_win_share > 0.5, metric]), collapse = ", "),
+          "; the decisive exception is ",
+          paste(win_pooled[lstm_win_share <= 0.5, unique(metric)], collapse = ", "), ")")
 }
 bench_log(paste("H5 verdict:", h5_verdict))
 
 writeLines(c(
-   "# H5 verdict -- LSTM benchmark vs GR4J at low flows",
+   "# H5 verdict -- LSTM benchmark vs GR4J and GR6J at low flows",
    "",
    paste0("**Date:** ", format(Sys.time()), " | metric_version ", metric_version),
    "",
@@ -360,9 +370,12 @@ writeLines(c(
    "",
    paste0("**GR6J leg:** ", gr6j_note),
    "",
-   paste0("Win rates per metric and structure (share of catchments where the ",
-          "LSTM cross-model median beats that structure's cross-model median; ",
-          "stratified by aridity tercile):"),
+   paste0("Win rates per metric and structure -- **pooled (decision basis):**"),
+   "",
+   knitr::kable(win_pooled),
+   "",
+   "Stratified by aridity tercile (supporting evidence for the semi-arid /",
+   "hard-rock claim, not part of the rule):",
    "",
    knitr::kable(win_rate),
    "",

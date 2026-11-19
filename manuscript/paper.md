@@ -136,6 +136,33 @@ GR6J was calibrated under the identical-treatment rule (192 catchments calibrate
 
 logNSE is **not** materially divergent anywhere — the structures differ in *where* and *how much* water they leave in the dry season, not in overall log-skill. GR6J's exponential store produces substantially lower 7-day minima (mam7) in the dry tercile (negative div = GR6J smaller), while overestimating low-flow volume (positive lf_volume div) in wet and intermediate terciles. **Per the pre-registered guardrail this is quantified divergence, not a superiority claim**: whether GR6J's drier dry-season behaviour is more faithful on any given catchment is an out-of-sample question the SSP-projection leg (14 GCMs × 4 SSPs) will carry forward, and per H2's falsification rule the structural axis cannot be dropped from Objective 4.
 
+### 5.4 H5 verdict: the CAMELS-IND-Proj LSTM benchmark audited at low flows (Phase 5, executed 19 Nov 2026)
+
+Track B (CAMELS-IND-Proj, Singh et al. 2026, Zenodo 21775597) was ingested as the **benchmark object only** — never substrate, LSTM series never treated as observed. The archive was verified by CRC test (30,751 files, 35.3 GB unpacked) and its structure discovered from the data: 13 GCMs × 5 scenarios, one aggregate streamflow table per GCM × scenario (472 catchments, daily, cumecs), converted to mm/day with the same CAMELS-IND catchment areas used by GR4J/GR6J — a conversion validated against the observed record (median LSTM/observed mean-flow ratio 1.17, hard-gated in `BENCH_00`).
+
+Two audit findings about the dataset itself, both logged in `data_processed/bench/bench_00_log.txt`:
+
+- **The "239 confidence-flagged catchments" claim is unsupported by the distributed data.** No confidence/flag/NaN-mask file exists anywhere in the archive, and the aggregate streamflow header is exactly `year, month, day` + 472 gauge columns — no flag column. The claim must be re-scored against the data-description PDF or withdrawn; until then H5 is computed on the full benchmark set, and the paper does not use the flag construct.
+- **The benchmark shares only 8 of our 14 shortlisted GCMs** (12 of our 22-model Track-A pool). One is a naming variant (`EC-Earth3-Veg` = our `EC-Earth3-Veg-LR`); `NorESM2-LM` has no Track-A counterpart and is excluded with a log line. The H5 like-for-like win rate is therefore computed on the 12-GCM intersection; the 8-model shortlist subset is the one that will matter for the SSP-phase comparison.
+
+The pre-registered rule was applied with **both legs evaluated**: the win rates below are shares of catchments where the LSTM cross-model median (over the 12 matched GCMs) beats the corresponding structure's cross-model median, on the shared catchment set, evaluation window 2001–2014, `metric_version v1`. The decision basis is the pooled table; the aridity split is supporting evidence only.
+
+**H5 STANDS** (verdict file: `data_processed/bench/h5_verdict.md`) — the LSTM does **not** uniformly beat GR4J/GR6J at low flows, but the structure of the result is the finding:
+
+| compared_with | metric | LSTM win share | n |
+|---|---|---|---|
+| GR4J / GR6J | lf_volume_bias | **0.92 / 0.95** | 78 |
+| GR4J / GR6J | logNSE | **0.86 / 0.88** | 172 |
+| GR4J / GR6J | mam7_bias | **0.81 / 0.78** | 127 |
+| GR4J / GR6J | q95_bias | **0.71 / 0.71** | 70 |
+| GR4J / GR6J | dry_spell_bias | **0.39 / 0.39** | 78 |
+
+The LSTM is better on the **magnitude** low-flow metrics — total skill (logNSE), low-flow volume, 7-day minima, Q95 — but loses the **duration** metric on both structures: consecutive dry days below the observed Q90 threshold are reproduced better by the calibrated conceptual models in 61% of catchments. That split is exactly what a single blended score (the kind the LSTM leaderboard framing invites) would have hidden: the benchmark is *wetter and smoother*, not more faithful to drought spells. This is the process-based evidence behind the "LSTM dry tail unaudited" gap identified in the prior-art table — now audited, with the audit's own metric-level resolution.
+
+The aridity split supports the pre-registered suspicion in its expected direction: the LSTM's logNSE advantage is smallest in the dry tercile (0.62 vs GR4J, 0.68 vs GR6J, against 0.98/0.98 and 0.93/0.95 in intermediate/wet), and on dry-spell duration in the dry tercile the LSTM wins only 25% of catchments. The dry-tercile cells are small (n = 7–53 per metric) and are reported as such, not averaged away.
+
+**Implications carried forward:** (i) H4's decomposition remains necessary — a benchmark that wins magnitudes but loses drought duration cannot arbitrate drought-projection uncertainty on its own; (ii) the SSP-phase comparison (our GR4J/GR6J projections vs the benchmark's 2015–2100 envelope, already cached as per-SSP window summaries in `bench_lstm_proj_lowflow.csv`) now has a like-for-like GCM basis; (iii) the framework's two-track discipline is vindicated rather than merely asserted — the benchmark was usable *because* it was treated as an audit object, not as substrate.
+
 ## 6. Limitations
 
 Single members only (no internal-variability spread). GR4J/GR6J parameters calibrated on observed forcings — transfer to model climates assumes structural stationarity (tested via O2/O4 interactions). Daily timing skill vs free-running models is inherently bounded; seasonal and distributional low-flow metrics complement daily KGE. **Abstraction/anthropogenic modulation is not modelled**: peninsular hard-rock basins with heavy pumping mean naturalized low-flow projections translate into water-scarcity statements only with caution — the anthropogenic-drought phase (roadmap Year 4, using CAMELS-IND regulation attributes) addresses this and is flagged here, not promised.
@@ -147,7 +174,7 @@ Planned as 3–4 papers — full objectives, data dependencies, target journals 
 | Paper | Core content | Target | Status |
 |---|---|---|---|
 | **P1** (this repo) | Low-flow-aware CMIP6 selection + GR6J axis + propagation + decomposition (O1–O4/H1–H4) | WRR / HESS | historical leg done; SSP + phases pending |
-| **P2** | CAMELS-IND-Proj low-flow audit (O5/H5) — first process-based critical user | HESS / Sci. Data companion | download pending |
+| **P2** | CAMELS-IND-Proj low-flow audit (O5/H5) — first process-based critical user | HESS / Sci. Data companion | historical audit executed (H5 stands); SSP envelope comparison pending |
 | **P3** | National streamflow-drought climatology & low-flow threshold framework for Peninsular India (roadmap Phase 2 flagship) | WRR / JoH | engine = P1 |
 | **P4** | ML low-flow forecasting / S2S (roadmap Phase 3); optional P5 anthropogenic drought & e-flows (Year 4) | HESS / WRR | foundation = P1+P2 |
 

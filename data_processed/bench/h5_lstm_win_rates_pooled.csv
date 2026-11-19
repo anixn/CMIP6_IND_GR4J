@@ -1,0 +1,11 @@
+compared_with,metric,lstm_win_share,n
+GR4J,dry_spell_bias,0.385,78
+GR4J,lf_volume_bias,0.923,78
+GR4J,logNSE,0.855,172
+GR4J,mam7_bias,0.811,127
+GR4J,q95_bias,0.714,70
+GR6J,dry_spell_bias,0.385,78
+GR6J,lf_volume_bias,0.949,78
+GR6J,logNSE,0.878,172
+GR6J,mam7_bias,0.78,127
+GR6J,q95_bias,0.714,70
