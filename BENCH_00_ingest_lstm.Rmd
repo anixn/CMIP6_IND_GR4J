@@ -16,8 +16,9 @@ source(file.path(tempdir(), "hyd00_setup.R"))
 **What this notebook does (H5 / Objective 5).** Ingests CAMELS-IND-Proj
 (Singh et al. 2026, Zenodo 21775597, CC BY 4.0) -- 13 CMIP6 GCMs x 4 SSPs
 daily LSTM streamflow 2015--2100 for 472 Peninsular-India catchments (hydroDL
-package; historical per-GCM streamflow included) -- as the **Track B
-benchmark object only** (AGENTS.md, two-track design fixed 18 Nov 2026):
+package; historical per-GCM streamflow 1980--2014 included) -- as the
+**Track B benchmark object only** (AGENTS.md, two-track design fixed 18 Nov
+2026):
 
 * Track B is the *audited object of H5* -- never substrate, never input to
   our models, and **LSTM series are never treated as observed truth**;
@@ -26,26 +27,29 @@ benchmark object only** (AGENTS.md, two-track design fixed 18 Nov 2026):
   be our substrate (our Track A correction is catchment-tuned, seasonal,
   out-of-sample-ranked).
 
-Steps:
+Steps (layout discovered from the archive, 19 Nov 2026 -- no hardcoded
+assumptions survived into the extraction code):
 
-1. **Integrity + unpacking**: verify the downloaded zip's exact byte size and
-   CRC (`unzip -t`), then unzip once into `D:/Datasets/CAMELS_IND_Proj/extract/`.
-2. **Structure discovery** (no hardcoded layout): walk the extracted tree,
-   write `data_processed/bench/zip_inventory.csv` (relative path, size, depth,
-   guessed role), and **verify the "239 confidence-flagged catchments" claim**
-   from the project brief against what is actually inside (the data-description
-   PDF's file-structure diagram is an embedded image -- not text-extractable --
-   so the claim is checked here, in the data, not in prose).
-3. **Extraction**: for every Tier 1/2 catchment in the HYD roster x every
-   GCM x every SSP, pull the daily LSTM streamflow 2015--2100, convert
-   **cumecs -> mm/day** with the CAMELS-IND catchment area (the same
-   `area_km2` used by GR4J/GR6J), and cache one rds per catchment under
-   `data_processed/bench/q_lstm/<id>.rds`. Unit conversion and any skipped
-   catchment are logged with reason codes -- no silent drops.
-4. **Provenance stamp**: every cached series carries `source =
-   "CAMELS-IND-Proj LSTM (Track B benchmark)"`, the zenodo DOI, the GCM/SSP
-   key, and the unit-conversion constants -- the H5 evaluator (BENCH_10)
-   consumes these caches only.
+1. **Integrity + selective unpack.** Verify byte size and CRC, then unpack
+   *only* the aggregate streamflow CSVs (`<GCM>/<scenario>/Streamflow_projected.csv`),
+   not the 35 GB tree. The archive is **Zip64 (> 4 GiB)**: Info-ZIP `unzip`
+   mis-parses it and R's internal `unz` refuses it (error -103), so 7-Zip is
+   the extraction engine and that choice is recorded in the log.
+2. **Structure discovery + claim checks.** Walk the full archive listing into
+   `data_processed/bench/zip_inventory.csv`, then score two brief claims
+   against the data rather than against prose: the "239 confidence-flagged
+   catchments" claim, and the GCM overlap between their 13 models and our
+   14-model shortlist.
+3. **Extraction.** For every Tier 1/2 catchment in the HYD roster x every GCM
+   x every scenario, pull the daily LSTM streamflow, convert **cumecs ->
+   mm/day** with the CAMELS-IND `area_km2` (the same area used by
+   GR4J/GR6J), and cache one rds per catchment under
+   `data_processed/bench/q_lstm/<id>.rds`. A unit-sanity check against the
+   observed record is written, not just asserted.
+4. **Provenance stamp.** Every cache carries `source =
+   "CAMELS-IND-Proj LSTM (Track B benchmark)"`, the zenodo DOI, the
+   GCM/scenario keys, and the unit-conversion constant. The H5 evaluator
+   (BENCH_10) consumes these caches only.
 
 ```{r log-file}
 bench_output_dir <- file.path(hyd_project_root, "data_processed", "bench")
@@ -62,11 +66,12 @@ bench_log <- function(msg) {
 ```{r config}
 bench_zip_fp   <- "D:/Datasets/CAMELS_IND_Proj/CAMELS-IND-Proj_data.zip"
 bench_extract  <- "D:/Datasets/CAMELS_IND_Proj/extract"
-bench_expected_bytes <- 11293105215L   # Zenodo record 21775597 file size
-bench_test_mode <- FALSE               # TRUE: 3 catchments x 2 GCMs x 1 SSP
+bench_expected_bytes <- 11293105215   # Zenodo record 21775597 file size
+bench_test_mode <- FALSE              # TRUE: 3 catchments x 2 GCMs x 1 SSP
+bench_log(paste0("BENCH_00 start | zip: ", bench_zip_fp))
 ```
 
-## 2. Zip integrity + one-time unpack
+## 2. Archive integrity + selective unpack
 
 ```{r unzip, eval=TRUE}
 stopifnot(file.exists(bench_zip_fp))
@@ -76,7 +81,7 @@ bench_log(paste0("zip size on disk: ", zip_size, " bytes (expected ",
 # Multi-connection downloaders (aria2c) write sparse segments ahead of the
 # completed bytes, so an almost-full file size proves nothing. Two guards:
 #   (a) no aria2 control file may remain (it exists while downloading),
-#   (b) the archive must pass a real integrity test before unpacking.
+#   (b) the archive must pass a real CRC test before unpacking.
 aria2_ctrl <- paste0(bench_zip_fp, ".aria2")
 if (file.exists(aria2_ctrl)) stop(paste0(
    "download still in progress: aria2 control file present (", aria2_ctrl,
@@ -84,116 +89,332 @@ if (file.exists(aria2_ctrl)) stop(paste0(
 if (zip_size < bench_expected_bytes) stop(paste0(
    "zip incomplete: ", zip_size, " < ", bench_expected_bytes,
    " bytes -- resume the download before running BENCH_00"))
-bench_log("running zip integrity test (unzip -t) ...")
-test_out <- system2("unzip", c("-t", shQuote(bench_zip_fp)),
-                    stdout = TRUE, stderr = TRUE)
-test_status <- attr(test_out, "status")
-if (!is.null(test_status) && test_status != 0) stop(paste0(
-   "zip integrity test FAILED (unzip -t exit ", test_status, "): ",
-   paste(utils::tail(test_out, 3), collapse = " | ")))
-bench_log("zip integrity test passed")
 
-if (!dir.exists(bench_extract)) {
-   utils::unzip(bench_zip_fp, exdir = bench_extract, overwrite = FALSE)
-   bench_log("unzip complete")
-} else {
-   bench_log("extract dir already present -- skipping unzip")
+# Extraction engine. This archive is Zip64 and > 4 GiB: Info-ZIP `unzip`
+# mis-parses the central-directory offsets ("extra bytes at beginning ...
+# zipfile corrupt") and R's internal unz fails with error -103. 7-Zip reads
+# it correctly, so 7-Zip is used and the choice is logged.
+find_7z <- function() {
+   cand <- c(Sys.which("7z"), Sys.which("7za"),
+             "C:/Program Files/7-Zip/7z.exe", "C:/tools/7z.exe")
+   cand <- cand[nzchar(cand) & file.exists(cand)]
+   if (!length(cand)) NA_character_ else cand[1]
 }
+bench_7z <- find_7z()
+if (is.na(bench_7z)) stop("7-Zip not found: install 7-Zip or add 7z.exe to PATH")
+bench_log(paste0("extraction engine: ", bench_7z, " (Zip64 archive; unzip/unz cannot read it)"))
+
+bench_log("running archive CRC test (7z t) ...")
+t_out <- tempfile(fileext = ".txt")
+t_status <- system2(bench_7z, c("t", shQuote(bench_zip_fp)),
+                    stdout = t_out, stderr = t_out)
+if (!identical(as.integer(t_status), 0L)) stop(paste0(
+   "archive integrity test FAILED (7z t exit ", t_status, "): ",
+   paste(utils::tail(readLines(t_out, warn = FALSE), 3), collapse = " | ")))
+bench_log("archive integrity test passed")
+
+if (!dir.exists(bench_extract)) dir.create(bench_extract, recursive = TRUE)
+sf_present <- list.files(bench_extract, pattern = "^Streamflow.*\\.csv$",
+                         recursive = TRUE)
+if (!length(sf_present)) {
+   bench_log("unpacking aggregate streamflow CSVs only (not the 35 GB tree) ...")
+   x_out <- tempfile(fileext = ".txt")
+   x_status <- system2(bench_7z,
+      c("x", "-y", paste0("-o", bench_extract), shQuote(bench_zip_fp),
+        "-ir!Streamflow*.csv"), stdout = x_out, stderr = x_out)
+   if (!identical(as.integer(x_status), 0L)) stop(paste0(
+      "unpack FAILED (7z x exit ", x_status, "): ",
+      paste(utils::tail(readLines(x_out, warn = FALSE), 3), collapse = " | ")))
+   bench_log("unpack complete")
+} else {
+   bench_log(paste0("aggregate streamflow CSVs already present (", length(sf_present),
+                    ") -- skipping unpack"))
+}
+sf_present <- list.files(bench_extract, pattern = "^Streamflow.*\\.csv$",
+                         recursive = TRUE)
+cat("streamflow CSVs on disk:", length(sf_present), "\n")
 ```
 
-## 3. Structure discovery + the "239 confidence flags" claim check
+## 3. Structure discovery + claim checks
 
-```{r discovery, eval=TRUE}
-all_files <- list.files(bench_extract, recursive = TRUE, include.dirs = FALSE)
-inv <- data.table::data.table(
-   rel_path = all_files,
-   size_bytes = vapply(file.path(bench_extract, all_files), file.size,
-                       numeric(1)),
-   depth = vapply(strsplit(all_files, "/"), length, integer(1)),
-   ext = tools::file_ext(all_files))
-inv[, top_dir := vapply(strsplit(rel_path, "/"), `[`, character(1), 1)]
-inv[, n_path_tokens := vapply(strsplit(rel_path, "/"), length, integer(1))]
-data.table::fwrite(inv, file.path(bench_output_dir, "zip_inventory.csv"))
-
-cat("extracted files:", nrow(inv), "\n")
+```{r inventory, eval=TRUE}
+# Full archive listing (30k+ entries) parsed from `7z l -ba -slt`, so the
+# inventory describes the archive, not a half-unpacked tree.
+inv_fp <- file.path(bench_output_dir, "zip_inventory.csv")
+if (!file.exists(inv_fp)) {
+   bench_log("building archive inventory (7z l -ba -slt) ...")
+   l_out <- tempfile(fileext = ".txt")
+   l_status <- system2(bench_7z, c("l", "-ba", "-slt", shQuote(bench_zip_fp)),
+                       stdout = l_out, stderr = l_out)
+   if (!identical(as.integer(l_status), 0L)) stop("archive listing failed")
+   ln <- readLines(l_out, warn = FALSE)
+   inv <- data.table::data.table(
+      rel_path = gsub("\\\\", "/", sub("^Path = ", "", ln[startsWith(ln, "Path = ")])),
+      size_bytes = as.numeric(sub("^Size = ", "", ln[startsWith(ln, "Size = ")])),
+      is_dir = sub("^Folder = ", "", ln[startsWith(ln, "Folder = ")]) == "+")
+   inv <- inv[rel_path != ""]
+   inv[, ext := tools::file_ext(rel_path)]
+   inv[, depth := vapply(strsplit(rel_path, "/"), length, integer(1))]
+   inv[, top_dir := vapply(strsplit(rel_path, "/"), `[`, character(1), 1)]
+   data.table::fwrite(inv, inv_fp)
+   bench_log(paste0("inventory written: ", nrow(inv), " entries, ",
+                    sum(inv$is_dir), " dirs, ", sum(!inv$is_dir), " files"))
+}
+inv <- data.table::fread(inv_fp)
+cat("archive entries:", nrow(inv), "| files:", sum(inv$is_dir == FALSE),
+    "| uncompressed bytes:", format(sum(inv$size_bytes), big.mark = ","), "\n")
 cat("top-level entries:\n"); print(sort(unique(inv$top_dir)))
 cat("extensions:\n");        print(table(inv$ext, useNA = "ifany"))
-
-# claim check: the project brief says "239 confidence-flagged catchments".
-# Look for any confidence/flag/nan-related filename or column evidence.
-conf_hits <- inv[grepl("confid|flag|nan|mask|qual", rel_path,
-                       ignore.case = TRUE), rel_path]
-if (length(conf_hits)) {
-   cat("confidence/flag-like files found:\n"); print(conf_hits)
-   bench_log(paste0("claim check: confidence-like files present: ",
-                    paste(conf_hits, collapse = "; ")))
-} else {
-   cat("NO confidence/flag-like file found in the zip -- the '239",
-       "confidence-flagged catchments' brief claim must be re-scored\n")
-   bench_log("claim check: NO confidence-like file found (brief claim unsupported by filenames; check column headers of the streamflow CSVs before final verdict)")
-}
-
-# GCM x SSP discovery from the path tokens (adapt to whatever tokens exist)
-path_tokens <- table(unlist(strsplit(inv$rel_path, "/")))
-cat("most frequent path tokens:\n")
-print(utils::head(sort(path_tokens, decreasing = TRUE), 40))
 ```
 
-## 4. Extract per-catchment LSTM series (cumecs -> mm/day)
+```{r grid, eval=TRUE}
+# The layout is <root>/<GCM>/<scenario>/{Streamflow_projected.csv,02_Forcing_Data/<id>.csv}
+fl <- inv[is_dir == FALSE & depth >= 4]
+fl[, gcm := vapply(strsplit(rel_path, "/"), `[`, character(1), 2)]
+fl[, scenario := vapply(strsplit(rel_path, "/"), `[`, character(1), 3)]
+fl[, fname := basename(rel_path)]
+
+bench_gcms <- sort(unique(fl[grepl("^ssp[0-9]+$|^historical$", scenario), gcm]))
+bench_scenarios <- sort(unique(fl[grepl("^ssp[0-9]+$|^historical$", scenario),
+                                 scenario]))
+cat("GCMs in archive (", length(bench_gcms), "):\n", sep = ""); print(bench_gcms)
+cat("scenarios (", length(bench_scenarios), "):\n", sep = ""); print(bench_scenarios)
+
+agg <- fl[fname == "Streamflow_projected.csv"]
+dup <- fl[grepl("Streamflow_projected", fname) & fname != "Streamflow_projected.csv"]
+cat("\naggregate streamflow files:", nrow(agg),
+    "| expected GCM x scenario:", length(bench_gcms) * length(bench_scenarios), "\n")
+if (nrow(dup)) {
+   bench_log(paste0("duplicate aggregate files ignored (non-canonical name): ",
+                    paste(dup$rel_path, collapse = "; ")))
+   cat("ignored duplicate files:\n"); print(dup$rel_path)
+}
+data.table::fwrite(agg[, .(gcm, scenario, rel_path, size_bytes)],
+                   file.path(bench_output_dir, "archive_grid.csv"))
+```
+
+```{r claim-checks, eval=TRUE}
+# --- Claim 1: "239 confidence-flagged catchments" (project brief) ----------
+conf_hits <- inv[grepl("confid|flag|nan|mask|qual", rel_path, ignore.case = TRUE),
+                 rel_path]
+if (length(conf_hits)) {
+   cat("confidence/flag-like files found:\n"); print(conf_hits)
+   bench_log(paste0("claim check (confidence flags): candidates present: ",
+                    paste(conf_hits, collapse = "; ")))
+} else {
+   bench_log(paste0("claim check (confidence flags): FAILED -- no confidence/flag/NaN-mask ",
+                    "file exists anywhere in the archive; the '239 confidence-flagged ",
+                    "catchments' brief claim is NOT supported by the distributed data ",
+                    "and must be re-scored against the data-description PDF or withdrawn"))
+   cat("NO confidence/flag-like file in the archive -> brief claim unsupported\n")
+}
+# a flag could also be a column: the aggregate streamflow header is
+# year,month,day + one column per catchment, nothing else.
+probe_hdr <- names(data.table::fread(file.path(bench_extract, agg$rel_path[1]),
+                                     nrows = 0L))
+non_gauge <- probe_hdr[!grepl("^[0-9]+\\.0$", probe_hdr)]
+cat("non-gauge columns in the aggregate streamflow header:\n"); print(non_gauge)
+bench_log(paste0("claim check (confidence flags): aggregate header columns = ",
+                 paste(non_gauge, collapse = ","), " + ",
+                 sum(grepl("^[0-9]+\\.0$", probe_hdr)), " gauge columns; no flag column"))
+
+# --- Claim 2: GCM overlap with our 14-model shortlist ---------------------
+shortlist <- data.table::fread(file.path(hyd_output_dir, "model_shortlist_final.csv"))
+shortlist <- shortlist[selected == 1, model]
+# their naming differs for one model (resolution suffix dropped)
+bench_alias <- c("EC-Earth3-Veg" = "EC-Earth3-Veg-LR")
+bench_gcms_mapped <- ifelse(bench_gcms %in% names(bench_alias),
+                            bench_alias[bench_gcms], bench_gcms)
+shared <- intersect(bench_gcms_mapped, shortlist)
+cat("\nour shortlist (", length(shortlist), "): ", paste(shortlist, collapse = ", "), "\n", sep = "")
+cat("their GCMs (", length(bench_gcms), "): ", paste(bench_gcms, collapse = ", "), "\n", sep = "")
+cat("shared (", length(shared), "): ", paste(shared, collapse = ", "), "\n", sep = "")
+cat("theirs but not ours:", paste(setdiff(bench_gcms_mapped, shortlist), collapse = ", "), "\n")
+cat("ours but not theirs:", paste(setdiff(shortlist, bench_gcms_mapped), collapse = ", "), "\n")
+bench_log(paste0("GCM overlap with our shortlist: ", length(shared), " of ",
+                 length(shortlist), " (", paste(shared, collapse = ","),
+                 "); H5 like-for-like comparison must be restricted to these"))
+data.table::fwrite(data.table::data.table(
+   archive_gcm = bench_gcms, mapped_to_our_name = bench_gcms_mapped,
+   in_our_shortlist = bench_gcms_mapped %in% shortlist),
+   file.path(bench_output_dir, "gcm_overlap.csv"))
+```
+
+## 4. Extraction (cumecs -> mm/day) into per-catchment caches
 
 ```{r extract, eval=TRUE}
-# roster: HYD Tier 1/2 catchments with the area attribute used everywhere
-inputs_sum <- data.table::fread(file.path(hyd_output_dir,
-                                          "hyd_inputs_summary.csv"),
+inputs_sum <- data.table::fread(file.path(hyd_output_dir, "hyd_inputs_summary.csv"),
                                 colClasses = list(character = "id"))
 roster <- inputs_sum[, .(id, area_km2)]
 if (bench_test_mode) roster <- roster[1:3]
+# our ids are zero-padded 5-digit strings ("03002"); their column headers are
+# numeric ("3002.0") -- the join key is the integer value, and unmatched
+# catchments are logged, never dropped silently.
+roster[, id_int := as.integer(id)]
 
+# one aggregate file at a time -> days x catchments matrix in mm/day
+read_agg_mm <- function(fp, rid_int, area) {
+   hdr <- names(data.table::fread(fp, nrows = 0L))
+   gi  <- suppressWarnings(as.integer(hdr))
+   keep <- which(gi %in% rid_int)
+   if (!length(keep)) return(NULL)
+   d <- data.table::fread(fp, select = hdr[c(1:3, keep)])
+   dates <- as.Date(sprintf("%d-%02d-%02d", d[["year"]], d[["month"]], d[["day"]]))
+   q <- as.matrix(d[, (3L + seq_along(keep)), with = FALSE])
+   ids <- sprintf("%05d", gi[keep])
+   # sweep() across COLUMNS: `q * 86.4 / area` would recycle the area vector
+   # down the rows (days) instead of across catchments -- that silent bug is
+   # what the unit check below is designed to catch.
+   q_mm <- sweep(q, 2L, area[match(ids, roster$id)], "/") * 86.4
+   list(dates = dates, q = q_mm, ids = ids)
+}
+
+agg[, scenario := as.character(scenario)]
+agg_hist <- agg[scenario == "historical"]
+agg_proj <- agg[scenario != "historical"]
+agg_hist[, fp := file.path(bench_extract, rel_path)]
+agg_proj[, fp := file.path(bench_extract, rel_path)]
+# keep the canonical file when a duplicate slipped into the archive
+agg_proj <- agg_proj[!grepl(" - Copy", fname)]
+if (bench_test_mode) {
+   agg_hist <- agg_hist[1:1]; agg_proj <- agg_proj[1:1]
+}
+
+bench_log(paste0("reading ", nrow(agg_hist), " historical + ", nrow(agg_proj),
+                 " projected aggregate files"))
+
+hist_q <- list(); hist_dates <- NULL; hist_ids <- NULL
+for (i in seq_len(nrow(agg_hist))) {
+   r <- read_agg_mm(agg_hist$fp[i], roster$id_int, roster$area_km2)
+   hist_q[[agg_hist$gcm[i]]] <- r$q
+   hist_dates <- r$dates; hist_ids <- r$ids
+   cat("  historical", agg_hist$gcm[i], ":", nrow(r$q), "days x", ncol(r$q),
+       "catchments\n")
+}
+cat("historical coverage:", format(min(hist_dates)), "to", format(max(hist_dates)), "\n")
+```
+
+```{r unit-check, eval=TRUE}
+# Do not assert the unit conversion -- measure it against the observed record.
+# If the archive were already mm/day, the converted means would be off by a
+# factor of ~area/86.4 (orders of magnitude), which this check would expose.
+unit_rows <- list()
+for (cid in utils::head(roster$id, 20)) {
+   obsf <- file.path(hyd_inputs_dir, paste0(cid, "_obs.csv"))
+   if (!file.exists(obsf)) next
+   obs <- data.table::fread(obsf, select = c("date", "Qobs_mm"))
+   obs[, date := as.Date(date)]
+   w <- obs[date >= hyd_valid_start & date <= hyd_valid_end]
+   if (!nrow(w)) next
+   qbar_obs <- mean(w$Qobs_mm, na.rm = TRUE)
+   qbar_lstm <- mean(vapply(hist_q, function(m) mean(m[, match(cid, hist_ids)], na.rm = TRUE),
+                            numeric(1)), na.rm = TRUE)
+   unit_rows[[length(unit_rows) + 1L]] <- data.table::data.table(
+      catchment = cid, obs_mean_mm = round(qbar_obs, 4),
+      lstm_mean_mm = round(qbar_lstm, 4),
+      ratio = round(qbar_lstm / qbar_obs, 3))
+}
+unit_chk <- data.table::rbindlist(unit_rows)
+data.table::fwrite(unit_chk, file.path(bench_output_dir, "unit_check.csv"))
+cat("unit sanity (LSTM/obs mean flow, mm/day, 2001-2014):\n")
+print(summary(unit_chk$ratio))
+unit_median <- stats::median(unit_chk$ratio)
+# A conversion error (wrong area alignment, wrong unit, wrong factor) shows up
+# here as an order-of-magnitude median. A benchmark LSTM can be biased, but not
+# by 4x in the median -- so this is a hard gate, not a note in the log.
+if (!is.finite(unit_median) || unit_median < 0.25 || unit_median > 4) {
+   stop(paste0("unit check FAILED: median LSTM/obs mean-flow ratio = ",
+               round(unit_median, 3), " (expected 0.25-4). The cumecs -> mm/day ",
+               "conversion or the gauge-column alignment is wrong; do not use ",
+               "these caches."))
+}
+bench_log(paste0("unit check: median LSTM/obs mean-flow ratio = ",
+                 round(unit_median, 3),
+                 " (range ", round(min(unit_chk$ratio), 2), "-",
+                 round(max(unit_chk$ratio), 2),
+                 "); conversion cumecs -> mm/day = q * 86.4 / area_km2 confirmed"))
+```
+
+```{r projections, eval=TRUE}
+# Projection pass: window summaries (the H5 low-flow envelope) + a staged
+# daily matrix per GCM x SSP so later modules never need to touch the zip.
+stage_dir <- file.path(bench_output_dir, "q_stage")
+dir.create(stage_dir, recursive = TRUE, showWarnings = FALSE)
+win_defs <- list(near = c("2015-01-01", "2040-12-31"),
+                 mid  = c("2041-01-01", "2060-12-31"),
+                 long = c("2081-01-01", "2100-12-31"))
+
+proj_rows <- list()
+for (i in seq_len(nrow(agg_proj))) {
+   g <- agg_proj$gcm[i]; s <- agg_proj$scenario[i]
+   r <- read_agg_mm(agg_proj$fp[i], roster$id_int, roster$area_km2)
+   # compress = FALSE: bulk series are regenerable (repo convention) and
+   # gzip on a 61 MB matrix per file would cost more CPU than the disk saves
+   saveRDS(list(gcm = g, scenario = s, dates = r$dates, ids = r$ids, q_mm = r$q),
+           file.path(stage_dir, paste0(g, "__", s, ".rds")), compress = FALSE)
+   for (wn in names(win_defs)) {
+      wd <- win_defs[[wn]]
+      ii <- which(r$dates >= as.Date(wd[1]) & r$dates <= as.Date(wd[2]))
+      if (!length(ii)) next
+      sub <- r$q[ii, , drop = FALSE]
+      proj_rows[[length(proj_rows) + 1L]] <- data.table::data.table(
+         catchment = r$ids, gcm = g, ssp = s, window = wn,
+         n_days = length(ii),
+         q05_mm  = apply(sub, 2, stats::quantile, probs = 0.05, names = FALSE, na.rm = TRUE),
+         q10_mm  = apply(sub, 2, stats::quantile, probs = 0.10, names = FALSE, na.rm = TRUE),
+         q50_mm  = apply(sub, 2, stats::quantile, probs = 0.50, names = FALSE, na.rm = TRUE),
+         mam7_mm = apply(sub, 2, function(v) min(data.table::frollmean(v, 7), na.rm = TRUE)),
+         mean_mm = colMeans(sub, na.rm = TRUE))
+   }
+   if (i %% 10 == 0) cat("  ...", i, "of", nrow(agg_proj), "\n")
+}
+proj_summary <- data.table::rbindlist(proj_rows)
+data.table::fwrite(proj_summary, file.path(bench_output_dir, "lstm_proj_summary.csv"))
+cat("projection summary rows:", nrow(proj_summary), "\n")
+bench_log(paste0("projection summaries: ", nrow(proj_summary), " rows (",
+                 data.table::uniqueN(proj_summary$gcm), " GCMs x ",
+                 data.table::uniqueN(proj_summary$ssp), " SSPs x ",
+                 data.table::uniqueN(proj_summary$window), " windows)"))
+```
+
+```{r cache-write, eval=TRUE}
 q_dir <- file.path(bench_output_dir, "q_lstm")
 dir.create(q_dir, recursive = TRUE, showWarnings = FALSE)
 
 excl <- list()
-for (i in seq_len(nrow(roster))) {
-   id <- roster$id[i]; area <- roster$area_km2[i]
-   res <- tryCatch({
-      # locate this catchment's streamflow files in the discovered tree:
-      # match on the gauge id token, then keep streamflow-like paths
-      hits <- inv[grepl(id, rel_path, fixed = TRUE) &
-                     grepl("streamflow|flow|Q", rel_path, ignore.case = TRUE),
-                  rel_path]
-      if (!length(hits)) {
-         excl[[length(excl) + 1L]] <- data.table::data.table(
-            module = "BENCH_00", catchment = id, reason_code = "not_found_in_zip",
-            detail = NA_character_)
-         "missing"
-      } else {
-         # read + convert + cache (per GCM x SSP, layout discovered above)
-         store <- list()
-         for (h in hits) {
-            fp <- file.path(bench_extract, h)
-            dt <- data.table::fread(fp, colClasses = list(character = 1))
-            setnames(dt, 1, "date")
-            val_cols <- setdiff(names(dt), "date")
-            # cumecs -> mm/day: Q[mm/d] = Q[m3/s] * 86400 / (area_km2 * 1e6) * 1000
-            for (vc in val_cols)
-               dt[, (vc) := get(vc) * 86.4 / area]
-            store[[h]] <- dt
-         }
-         saveRDS(list(id = id, area_km2 = area,
-                      source = "CAMELS-IND-Proj LSTM (Track B benchmark)",
-                      doi = "10.5281/zenodo.21775597",
-                      unit = "mm/day (converted from cumecs, factor 86.4/area_km2)",
-                      series = store),
-                 file.path(q_dir, paste0(id, ".rds")))
-         "ok"
+miss_col <- setdiff(roster$id, hist_ids)
+if (length(miss_col)) {
+   excl[[length(excl) + 1L]] <- data.table::data.table(
+      module = "BENCH_00", catchment = miss_col,
+      reason_code = "no_streamflow_column",
+      detail = "roster id absent from the archive's aggregate streamflow columns")
+}
+n_written <- 0L
+# chunked so peak memory stays ~1 GCM x 50 catchments, not the full cube
+chunks <- split(roster$id, ceiling(seq_len(nrow(roster)) / 50))
+for (ch in chunks) {
+   for (cid in ch) {
+      j <- match(cid, hist_ids)
+      if (is.na(j)) next
+      series <- list()
+      for (g in names(hist_q)) {
+         qv <- hist_q[[g]][, j]
+         series[[paste0(g, "/historical")]] <- data.table::data.table(
+            date = hist_dates, q = qv)
       }
-   }, error = function(e) {
-      excl[[length(excl) + 1L]] <- data.table::data.table(
-         module = "BENCH_00", catchment = id, reason_code = "read_error",
-         detail = conditionMessage(e))
-      "error"
-   })
-   if (i %% 25 == 0) cat("  ...", i, "of", nrow(roster), "\n")
+      saveRDS(list(
+         id = cid,
+         area_km2 = roster$area_km2[match(cid, roster$id)],
+         source = "CAMELS-IND-Proj LSTM (Track B benchmark)",
+         doi = "10.5281/zenodo.21775597",
+         unit = "mm/day (converted from cumecs, factor 86.4/area_km2)",
+         n_gap_filled = sum(vapply(series, function(s) sum(is.na(s$q)), integer(1))),
+         series = series,
+         proj = proj_summary[catchment == cid][order(gcm, ssp, window)]),
+         file.path(q_dir, paste0(cid, ".rds")), compress = FALSE)
+      n_written <- n_written + 1L
+   }
+   cat("  cached", n_written, "of", nrow(roster), "\n")
 }
 
 excl_dt <- data.table::rbindlist(excl, use.names = TRUE, fill = TRUE)
@@ -201,20 +422,26 @@ if (nrow(excl_dt)) {
    data.table::fwrite(excl_dt, file.path(hyd_project_root, "data_processed",
                                          "logs", "BENCH_00_exclusions.csv"))
 }
-n_cached <- length(list.files(q_dir, pattern = "\\.rds$"))
-bench_log(paste0("BENCH_00 done: cached ", n_cached, " catchments | excluded ",
-                 nrow(excl_dt)))
-cat("cached:", n_cached, "| excluded:", nrow(excl_dt), "\n")
+bench_log(paste0("BENCH_00 done: cached ", n_written, " catchments | excluded ",
+                 nrow(excl_dt), " | staged daily projection files: ",
+                 length(list.files(stage_dir, pattern = "\\.rds$"))))
+cat("cached:", n_written, "| excluded:", nrow(excl_dt), "\n")
 ```
 
 ## Take-away
 
-- `data_processed/bench/q_lstm/<id>.rds` -- per-catchment LSTM series cache
-  (all GCMs x SSPs, mm/day, provenance-stamped, Track B benchmark only).
-- `zip_inventory.csv` -- the discovered structure (auditable; no hardcoded
-  layout assumptions survived into the extraction code).
-- The "239 confidence-flagged catchments" brief claim is scored here, in
-  data, and recorded in `bench_00_log.txt` -- `BENCH_10_lowflow_eval.Rmd`
-  computes the low-flow metric suite on these series (same `metric_version
-  v1` definitions) and writes `h5_verdict.md` against the pre-registered H5
-  rule (LSTM does NOT uniformly beat GR4J/GR6J at low flows).
+- `data_processed/bench/q_lstm/<id>.rds` -- per-catchment LSTM cache:
+  historical daily series per GCM (mm/day, provenance-stamped, Track B
+  benchmark only) plus the per-SSP window low-flow summaries (`proj`).
+- `data_processed/bench/q_stage/<GCM>__<ssp>.rds` -- staged daily projection
+  matrices, so later drought/SRI modules never have to touch the 11 GB zip.
+- `zip_inventory.csv` / `archive_grid.csv` / `gcm_overlap.csv` /
+  `unit_check.csv` -- the discovered structure and the two claim checks,
+  auditable, with the reasoning in `bench_00_log.txt`.
+- Two findings that constrain H5 and must reach the paper: (i) the archive
+  contains **no confidence-flag object**, so the brief's "239
+  confidence-flagged catchments" claim is unsupported by the distributed data;
+  (ii) the benchmark shares only **8** of our 14 shortlisted GCMs, so the H5
+  like-for-like comparison must be restricted to that intersection.
+- `BENCH_10_lowflow_eval.Rmd` applies the same `metric_version v1` suite to
+  these series and writes `h5_verdict.md` against the pre-registered H5 rule.

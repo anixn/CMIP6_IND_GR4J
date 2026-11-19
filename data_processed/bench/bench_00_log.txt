@@ -1,0 +1,31 @@
+2026-11-19 13:46:38 | BENCH_00 start | zip: D:/Datasets/CAMELS_IND_Proj/CAMELS-IND-Proj_data.zip 
+2026-11-19 13:46:38 | zip size on disk: 11293105215 bytes (expected 11293105215) 
+2026-11-19 13:46:38 | extraction engine: C:/Program Files/7-Zip/7z.exe (Zip64 archive; unzip/unz cannot read it) 
+2026-11-19 13:46:38 | running archive CRC test (7z t) ... 
+2026-11-19 13:50:10 | archive integrity test passed 
+2026-11-19 13:50:10 | unpacking aggregate streamflow CSVs only (not the 35 GB tree) ... 
+2026-11-19 13:51:26 | unpack complete 
+2026-11-19 13:51:26 | building archive inventory (7z l -ba -slt) ... 
+2026-11-19 13:51:26 | inventory written: 30894 entries, 143 dirs, 30751 files 
+2026-11-19 13:51:27 | duplicate aggregate files ignored (non-canonical name): CAMELS-IND-Proj_data/MPI-ESM1-2-HR/ssp370/Streamflow_projected - Copy.csv 
+2026-11-19 13:51:27 | claim check (confidence flags): FAILED -- no confidence/flag/NaN-mask file exists anywhere in the archive; the '239 confidence-flagged catchments' brief claim is NOT supported by the distributed data and must be re-scored against the data-description PDF or withdrawn 
+2026-11-19 13:51:27 | claim check (confidence flags): aggregate header columns = year,month,day + 472 gauge columns; no flag column 
+2026-11-19 13:51:27 | GCM overlap with our shortlist: 8 of 14 (ACCESS-ESM1-5,BCC-CSM2-MR,CanESM5,EC-Earth3,EC-Earth3-Veg-LR,INM-CM4-8,MPI-ESM1-2-HR,NorESM2-MM); H5 like-for-like comparison must be restricted to these 
+2026-11-19 13:51:27 | reading 13 historical + 52 projected aggregate files 
+2026-11-19 13:51:37 | unit check: median LSTM/obs mean-flow ratio = 4.801 (range 0.1-156.28); conversion cumecs -> mm/day = q * 86.4 / area_km2 confirmed 
+2026-11-19 13:56:08 | projection summaries: 37752 rows (13 GCMs x 4 SSPs x 3 windows) 
+2026-11-19 13:56:47 | BENCH_00 done: cached 242 catchments | excluded 0 | staged daily projection files: 52 
+2026-11-19 14:00:13 | BENCH_00 start | zip: D:/Datasets/CAMELS_IND_Proj/CAMELS-IND-Proj_data.zip 
+2026-11-19 14:00:13 | zip size on disk: 11293105215 bytes (expected 11293105215) 
+2026-11-19 14:00:13 | extraction engine: C:/Program Files/7-Zip/7z.exe (Zip64 archive; unzip/unz cannot read it) 
+2026-11-19 14:00:13 | running archive CRC test (7z t) ... 
+2026-11-19 14:05:08 | archive integrity test passed 
+2026-11-19 14:05:08 | aggregate streamflow CSVs already present (66) -- skipping unpack 
+2026-11-19 14:05:08 | duplicate aggregate files ignored (non-canonical name): CAMELS-IND-Proj_data/MPI-ESM1-2-HR/ssp370/Streamflow_projected - Copy.csv 
+2026-11-19 14:05:08 | claim check (confidence flags): FAILED -- no confidence/flag/NaN-mask file exists anywhere in the archive; the '239 confidence-flagged catchments' brief claim is NOT supported by the distributed data and must be re-scored against the data-description PDF or withdrawn 
+2026-11-19 14:05:09 | claim check (confidence flags): aggregate header columns = year,month,day + 472 gauge columns; no flag column 
+2026-11-19 14:05:09 | GCM overlap with our shortlist: 8 of 14 (ACCESS-ESM1-5,BCC-CSM2-MR,CanESM5,EC-Earth3,EC-Earth3-Veg-LR,INM-CM4-8,MPI-ESM1-2-HR,NorESM2-MM); H5 like-for-like comparison must be restricted to these 
+2026-11-19 14:05:09 | reading 13 historical + 52 projected aggregate files 
+2026-11-19 14:05:19 | unit check: median LSTM/obs mean-flow ratio = 1.168 (range 0.29-2.75); conversion cumecs -> mm/day = q * 86.4 / area_km2 confirmed 
+2026-11-19 14:08:07 | projection summaries: 37752 rows (13 GCMs x 4 SSPs x 3 windows) 
+2026-11-19 14:08:12 | BENCH_00 done: cached 242 catchments | excluded 0 | staged daily projection files: 52 

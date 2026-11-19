@@ -1,0 +1,389 @@
+---
+title: "GR6J 40 -- GR6J CMIP-driven low-flow metrics (same v1 suite, structure axis)"
+subtitle: "Phase 2 -> 5 bridge: the GR6J half of H5 and the structure axis of H4 -- parallel module"
+output:
+   html_document:
+      css: style_academic.css
+---
+
+```{r source-setup, include=FALSE}
+knitr::purl("HYD_00_setup.Rmd", file.path(tempdir(), "hyd00_setup.R"), documentation = 2)
+source(file.path(tempdir(), "hyd00_setup.R"))
+knitr::purl("GR6J_00_setup.Rmd", file.path(tempdir(), "gr6j00_setup.R"), documentation = 2)
+source(file.path(tempdir(), "gr6j00_setup.R"))
+```
+
+# Notebook 40 -- GR6J CMIP-driven low-flow metrics
+
+**What this notebook does.** GR6J_20 calibrated GR6J on the observed record and
+GR6J_30 measured the GR4J/GR6J divergence *under observed forcing* (H2). This
+module runs the **same calibrated GR6J parameters driven by the bias-corrected
+CMIP6 historical series** and computes the **identical `metric_version v1`
+low-flow suite** as `LOWFLOW_00_metrics.Rmd`:
+
+* it supplies the **GR6J leg of H5** -- BENCH_10's pre-registered rule names
+  "GR4J *and* GR6J", and until now only the GR4J CMIP-driven pass existed;
+* it supplies the **structure axis of H4** -- the GR4J/GR6J contrast must be
+  measured on CMIP-driven series, not only on the observed record, because the
+  decomposition asks how much of the *projection* variance is structure.
+
+**Identical-by-construction.** Forcings (QED-corrected `qm_corrected/`), warm-up,
+run window, evaluation window (2001--2014), metric functions, guards and reason
+codes are copied verbatim from `LOWFLOW_00_metrics.Rmd`. The only change is
+`airGR::RunModel_GR4J` -> `airGR::RunModel_GR6J` and the parameter directory.
+If the two metric tables ever disagree on a shared catchment for a reason other
+than the model structure, that is a bug, not a finding -- so a parity check is
+run at the end.
+
+**Roster discipline.** Only catchments with **both** a GR4J and a GR6J parameter
+file enter, so every GR6J row has a GR4J counterpart (H2/H4 are paired designs).
+Everything excluded is logged with a reason code.
+
+```{r log-file}
+gr6j40_dir <- file.path(gr6j_output_dir, "lowflow")
+dir.create(gr6j40_dir, recursive = TRUE, showWarnings = FALSE)
+dir.create(file.path(hyd_project_root, "data_processed", "logs"),
+           recursive = TRUE, showWarnings = FALSE)
+gr6j40_log_file <- file.path(gr6j40_dir, "gr6j_40_log.txt")
+```
+
+## 1. Configuration (mirrors LOWFLOW_00 exactly)
+
+```{r config}
+metric_version   <- "v1"
+low_metrics_vec  <- c("logNSE", "q95_bias", "lf_volume_bias",
+                      "dry_spell_bias", "mam7_bias")
+low_eval_start   <- hyd_valid_start          # 2001-01-01
+low_eval_end     <- hyd_valid_end            # 2014-12-31
+low_min_eval_days <- 3068
+low_log_eps      <- 0.01
+low_q90_prob     <- 0.10
+low_q95_prob     <- 0.05
+low_spell_w      <- 7
+gr6j40_test_mode <- FALSE                    # TRUE: 2 catchments x 2 models
+gr6j40_save_series <- TRUE
+```
+
+## 2. Roster (GR4J params AND GR6J params present)
+
+```{r roster}
+calib <- data.table::fread(file.path(hyd_output_dir, "hyd_calib_summary.csv"),
+                           colClasses = list(character = "id"))
+roster <- calib[status == "calibrated"]
+
+inv <- data.table::fread(file.path(hyd_qed_dir, "inventory.csv"),
+                         colClasses = list(character = "id"))
+roster <- merge(roster, inv[, .(id, tier = final_action)], by = "id", all.x = TRUE)
+
+gr4j_params_dir <- file.path(hyd_output_dir, "params")
+gr6j_params_dir <- file.path(gr6j_output_dir, "params")
+roster[, has_gr4j := file.exists(file.path(gr4j_params_dir, paste0(id, ".rds")))]
+roster[, has_gr6j := file.exists(file.path(gr6j_params_dir, paste0(id, ".rds")))]
+
+# no silent drops: a calibrated catchment missing one of the two parameter
+# sets cannot enter a paired design -- record it, do not quietly shrink n
+drop_unpaired <- roster[has_gr4j == FALSE | has_gr6j == FALSE,
+                        .(module = "GR6J_40", catchment = id,
+                          reason_code = "unpaired_params_missing",
+                          detail = paste0("has_gr4j=", has_gr4j,
+                                          "; has_gr6j=", has_gr6j))]
+roster <- roster[has_gr4j == TRUE & has_gr6j == TRUE]
+
+topo <- data.table::fread(hyd_topo_fp, colClasses = list(character = "gauge_id"))
+topo[, id := hyd_normalize_id(gauge_id)]
+roster <- merge(roster, topo[, .(id, cwc_lat)], by = "id", all.x = TRUE)
+
+if (gr6j40_test_mode) roster <- roster[id %in% c("03002", "03005")]
+cat("Paired catchments (GR4J + GR6J params):", nrow(roster), "\n")
+cat("Dropped for missing parameters:", nrow(drop_unpaired), "\n")
+```
+
+## 3. Models (same 22 corrected series as LOWFLOW_00)
+
+```{r models}
+ranking <- data.table::fread(file.path(hyd_qed_dir, "model_ranking_overall.csv"))
+models <- ranking$model[sapply(ranking$model, function(m) {
+   dir.exists(file.path(hyd_qm_corr_dir, m))
+})]
+if (gr6j40_test_mode) models <- models[1:2]
+cat("Models with corrected series:", length(models), "\n")
+```
+
+## 4. Metric functions (verbatim from LOWFLOW_00 -- metric_version v1)
+
+```{r metric-fns}
+low_pairs <- function(dates, o, s) {
+   keep <- !is.na(o) & !is.na(s)
+   data.table::data.table(date = dates, o = o, s = s)[keep]
+}
+low_logNSE <- function(o, s) {
+   ol <- log10(o + low_log_eps); sl <- log10(s + low_log_eps)
+   if (length(ol) < 365 || stats::sd(ol) == 0) return(NA_real_)
+   1 - sum((sl - ol)^2) / sum((ol - mean(ol))^2)
+}
+low_q95_bias <- function(o, s) {
+   q95_o <- stats::quantile(o, probs = low_q95_prob, names = FALSE, type = 7)
+   if (!is.finite(q95_o) || q95_o <= 0) return(NA_real_)
+   q95_s <- stats::quantile(s, probs = low_q95_prob, names = FALSE, type = 7)
+   100 * (q95_s - q95_o) / q95_o
+}
+low_volume_bias <- function(pairs, q90_o) {
+   i_low <- pairs$o <= q90_o
+   vol_o <- sum(pairs$o[i_low]); vol_s <- sum(pairs$s[i_low])
+   if (vol_o <= 0) return(NA_real_)
+   100 * (vol_s - vol_o) / vol_o
+}
+low_dry_spell_bias <- function(pairs, q90_o) {
+   below_o <- pairs$o < q90_o; below_s <- pairs$s < q90_o
+   yr <- as.integer(format(pairs$date, "%Y"))
+   spell_year_max <- function(below, years) {
+      tapply(below, years, function(b) {
+         r <- rle(as.logical(b))
+         if (!any(r$values)) 0L else max(r$lengths[r$values])
+      })
+   }
+   so <- spell_year_max(below_o, yr); ss <- spell_year_max(below_s, yr)
+   mo <- mean(so); ms <- mean(ss)
+   if (!is.finite(mo) || mo <= 0) return(NA_real_)
+   100 * (ms - mo) / mo
+}
+low_mam7_bias <- function(pairs) {
+   yr <- as.integer(format(pairs$date, "%Y"))
+   roll_o <- data.table::frollmean(pairs$o, n = low_spell_w)
+   roll_s <- data.table::frollmean(pairs$s, n = low_spell_w)
+   mam7 <- function(roll, years) {
+      ym <- tapply(roll, years, min, na.rm = TRUE)
+      ym <- ym[is.finite(ym)]
+      if (!length(ym)) NA_real_ else mean(ym)
+   }
+   mo <- mam7(roll_o, yr); ms <- mam7(roll_s, yr)
+   if (!is.finite(mo) || mo <= 0) return(NA_real_)
+   100 * (ms - mo) / mo
+}
+low_na_reason_vec <- function(metric, pairs, q90_o) {
+   ephemeral <- (q90_o <= 0 || min(pairs$o) <= 0)
+   data.table::fcase(
+      metric == "logNSE",         "log_zero_variance",
+      metric == "q95_bias",       if (ephemeral) "ephemeral_threshold_zero"
+                                  else "q95_guard",
+      metric == "lf_volume_bias", "no_days_below_q90",
+      metric == "dry_spell_bias", "no_obs_dry_spell",
+      metric == "mam7_bias",      "mam7_degenerate",
+      default = "metric_guard")
+}
+low_metric_rows <- function(id, model, dates, o, s, n_gap, n_extrap) {
+   pairs <- low_pairs(dates, o, s)
+   n_eval <- nrow(pairs)
+   extrap_share <- n_extrap / max(n_eval, 1L)
+   base <- data.table::data.table(
+      model = model, catchment = id,
+      period = paste(format(low_eval_start), format(low_eval_end), sep = "-"),
+      window = "valid", metric = low_metrics_vec, value = NA_real_,
+      n_eval_days = n_eval, n_gap_filled = n_gap,
+      extrapolation_share = round(extrap_share, 6),
+      metric_version = metric_version, metric_note = NA_character_)
+   if (n_eval < low_min_eval_days) {
+      base[, metric_note := "insufficient_eval_days"]
+      return(list(rows = base, excluded = TRUE))
+   }
+   q90_o <- stats::quantile(pairs$o, probs = low_q90_prob,
+                            names = FALSE, type = 7)
+   vals <- c(
+      logNSE         = low_logNSE(pairs$o, pairs$s),
+      q95_bias       = low_q95_bias(pairs$o, pairs$s),
+      lf_volume_bias = low_volume_bias(pairs, q90_o),
+      dry_spell_bias = low_dry_spell_bias(pairs, q90_o),
+      mam7_bias      = low_mam7_bias(pairs))
+   base[, value := round(as.numeric(vals), 5)]
+   base[is.na(value), metric_note := low_na_reason_vec(metric, pairs, q90_o)]
+   list(rows = base, excluded = FALSE)
+}
+```
+
+## 5. Simulation core (GR6J; identical inputs and windows)
+
+```{r sim-fns}
+zoo_gapfill <- function(x) {
+   i_na <- which(is.na(x))
+   if (length(i_na) == 0) return(x)
+   x[i_na] <- stats::approx(seq_along(x), x, xout = i_na, rule = 2)$y
+   x
+}
+hyd_read_corrected <- function(model, tier, id, var) {
+   dt <- data.table::fread(file.path(hyd_qm_corr_dir, model, tier,
+                                     paste0(id, "_", var, ".csv")),
+                           select = c("date", "corrected_value", "method_flag"))
+   data.table::setnames(dt, "corrected_value", var)
+   data.table::setnames(dt, "method_flag", paste0("flag_", var))
+   dt
+}
+
+# runs GR6J for one catchment x model; same signature and return contract as
+# LOWFLOW_00's low_simulate(), with the parameter source switched
+gr6j_simulate <- function(id, tier, lat, model, full_dates, i_warm, i_run_full,
+                          i_eval) {
+   obs <- data.table::fread(file.path(hyd_inputs_dir, paste0(id, "_obs.csv")),
+                            select = c("date", "Qobs_mm"))
+   prm <- readRDS(file.path(gr6j_params_dir, paste0(id, ".rds")))
+
+   pc <- hyd_read_corrected(model, tier, id, "pr")
+   tx <- hyd_read_corrected(model, tier, id, "tasmax")
+   tn <- hyd_read_corrected(model, tier, id, "tasmin")
+   dt <- Reduce(function(x, y) merge(x, y, by = "date", all = TRUE),
+                list(pc, tx, tn))
+   dt <- merge(obs, dt, by = "date", all.x = TRUE)
+   dt <- dt[order(as.Date(date))]
+   dt[, Tmean_C := (tasmax + tasmin) / 2]
+
+   n_gap <- sum(is.na(dt$Tmean_C))
+   if (n_gap > 0) {
+      dt[, Tmean_C := zoo_gapfill(Tmean_C)]
+      dt[, tasmax := zoo_gapfill(tasmax)]
+      dt[, tasmin := zoo_gapfill(tasmin)]
+      dt[is.na(pr), pr := 0]
+      if (sum(is.na(dt$Tmean_C)) > 0) stop("unfillable input gaps (n=", n_gap, ")")
+   }
+   dt[, PET_mm := airGR::PE_Oudin(JD = as.integer(format(as.Date(date), "%j")),
+                                  Temp = Tmean_C, Lat = lat, LatUnit = "deg")]
+
+   inputs <- airGR::CreateInputsModel(FUN_MOD = airGR::RunModel_GR6J,
+                                      DatesR = as.POSIXct(as.Date(dt$date)),
+                                      Precip = dt$pr, PotEvap = dt$PET_mm)
+   run_opt <- airGR::CreateRunOptions(FUN_MOD = airGR::RunModel_GR6J,
+                                      InputsModel = inputs,
+                                      IndPeriod_WarmUp = i_warm,
+                                      IndPeriod_Run = i_run_full)
+   out <- airGR::RunModel(inputs, run_opt, Param = prm$param,
+                          FUN_MOD = airGR::RunModel_GR6J)
+
+   i_eval_dt <- match(full_dates[i_eval], dt$date)
+   list(qobs = dt$Qobs_mm[i_eval_dt],
+        qsim = out$Qsim[i_eval - hyd_warmup_days],
+        n_gap_filled = n_gap,
+        extrap_eval = sum(c(dt$flag_pr[i_eval_dt], dt$flag_tasmax[i_eval_dt],
+                            dt$flag_tasmin[i_eval_dt]) != "within_range",
+                          na.rm = TRUE))
+}
+```
+
+## 6. Run: paired catchments x models
+
+```{r run, eval=TRUE}
+full_dates <- seq(hyd_period_start, hyd_period_end, by = "day")
+i_warm     <- seq(1L, hyd_warmup_days)
+i_run_full <- seq(1L, length(full_dates))[-i_warm]
+i_eval     <- which(full_dates >= low_eval_start & full_dates <= low_eval_end)
+eval_dates <- full_dates[i_eval]
+
+series_dir <- file.path(gr6j40_dir, "series")
+if (gr6j40_save_series) dir.create(series_dir, recursive = TRUE, showWarnings = FALSE)
+
+rows <- list(); excl <- list(); n_row <- 0L
+
+for (i in seq_len(nrow(roster))) {
+   id <- roster$id[i]; tier <- roster$tier[i]; lat <- roster$cwc_lat[i]
+   res_by_model <- list(); ok_models <- character(0)
+   for (m in models) {
+      sim <- tryCatch(
+         gr6j_simulate(id, tier, lat, m, full_dates, i_warm, i_run_full, i_eval),
+         error = function(e) {
+            excl[[length(excl) + 1L]] <- data.table::data.table(
+               module = "GR6J_40", catchment = id, model = m,
+               reason_code = "simulation_error",
+               detail = conditionMessage(e))
+            NULL
+         })
+      if (is.null(sim)) next
+      res_by_model[[m]] <- sim
+      ok_models <- c(ok_models, m)
+      mr <- low_metric_rows(id, m, eval_dates, sim$qobs, sim$qsim,
+                            sim$n_gap_filled, sim$extrap_eval)
+      rows[[n_row <- n_row + 1L]] <- mr$rows
+      if (mr$excluded) {
+         excl[[length(excl) + 1L]] <- data.table::data.table(
+            module = "GR6J_40", catchment = id, model = m,
+            reason_code = "insufficient_eval_days",
+            detail = paste0("n_eval_days=", mr$rows$n_eval_days[1]))
+      }
+   }
+   if (gr6j40_save_series && length(ok_models)) {
+      saveRDS(list(dates = eval_dates,
+                   qobs  = res_by_model[[1]]$qobs,
+                   qsim  = do.call(cbind, lapply(res_by_model, `[[`, "qsim")),
+                   models = ok_models),
+              file.path(series_dir, paste0(id, ".rds")))
+   }
+   if (i %% 20 == 0) cat("  ...", i, "of", nrow(roster), "\n")
+}
+
+gr6j_metrics <- data.table::rbindlist(rows, use.names = TRUE)
+gr6j_metrics[, structure := "GR6J"]
+data.table::fwrite(gr6j_metrics,
+                   file.path(gr6j40_dir, "lowflow_metrics_gr6j.csv"))
+
+excl_dt <- data.table::rbindlist(c(excl, list(drop_unpaired)),
+                                 use.names = TRUE, fill = TRUE)
+if (nrow(excl_dt)) {
+   data.table::fwrite(excl_dt, file.path(hyd_project_root, "data_processed",
+                                         "logs", "GR6J_40_exclusions.csv"))
+}
+cat("GR6J metric rows:", nrow(gr6j_metrics),
+    "| catchments:", data.table::uniqueN(gr6j_metrics$catchment),
+    "| excluded:", nrow(excl_dt), "\n")
+```
+
+## 7. Parity check against the GR4J layer (bug detector, not a finding)
+
+```{r parity, eval=TRUE}
+gr4j_metrics <- data.table::fread(file.path(hyd_project_root, "data_processed",
+                                            "lowflow", "lowflow_metrics.csv"),
+                                  colClasses = list(character = "catchment"))
+paired_keys <- merge(
+   unique(gr4j_metrics[, .(model, catchment)]),
+   unique(gr6j_metrics[, .(model, catchment)]),
+   by = c("model", "catchment"))
+cat("model x catchment pairs present in both structures:", nrow(paired_keys), "\n")
+
+# the observed side must be identical: compare n_eval_days on shared keys
+chk <- merge(
+   gr4j_metrics[metric == "logNSE", .(model, catchment, n4 = n_eval_days)],
+   gr6j_metrics[metric == "logNSE", .(model, catchment, n6 = n_eval_days)],
+   by = c("model", "catchment"))
+n_bad <- nrow(chk[n4 != n6])
+cat("pairs with mismatched n_eval_days (must be 0):", n_bad, "\n")
+if (n_bad > 0) {
+   data.table::fwrite(chk[n4 != n6],
+      file.path(hyd_project_root, "data_processed", "logs",
+                "GR6J_40_parity_failures.csv"))
+   warning("n_eval_days mismatch between GR4J and GR6J layers -- inspect before use")
+}
+
+# structure divergence on CMIP-driven series (descriptive; H2 is the verdict)
+div <- merge(
+   gr4j_metrics[, .(model, catchment, metric, gr4j = value)],
+   gr6j_metrics[, .(model, catchment, metric, gr6j = value)],
+   by = c("model", "catchment", "metric"))
+div[, divergence := gr6j - gr4j]
+div_summary <- div[is.finite(divergence),
+   .(n = .N,
+     median_divergence = round(stats::median(divergence), 3),
+     share_abs_ge_10 = round(mean(abs(divergence) >= 10), 3)),
+   by = metric][order(-abs(median_divergence))]
+data.table::fwrite(div, file.path(gr6j40_dir, "cmip_structure_divergence.csv"))
+print(div_summary)
+cat("\nGR6J_40 done:", format(Sys.time()), "\n")
+```
+
+## Take-away
+
+- `data_processed/gr6j/lowflow/lowflow_metrics_gr6j.csv` -- the GR6J
+  CMIP-driven metric table, identical schema to
+  `data_processed/lowflow/lowflow_metrics.csv` plus `structure`.
+- `cmip_structure_divergence.csv` -- GR6J minus GR4J per model x catchment x
+  metric on CMIP-driven series: the structure axis for H4, and the GR6J input
+  to BENCH_10's pre-registered H5 rule.
+- `GR6J_40_exclusions.csv` -- every dropped catchment/model with a reason
+  code, including catchments that could not enter the paired design.
+- This module does **not** re-adjudicate H2. H2's verdict is measured under
+  observed forcing (`GR6J_30_divergence.Rmd`); the CMIP-driven divergence
+  reported here is a projection-side quantity and is labelled as such.

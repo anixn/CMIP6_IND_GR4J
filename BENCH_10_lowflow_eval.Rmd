@@ -18,17 +18,19 @@ source(file.path(tempdir(), "hyd00_setup.R"))
 `LOWFLOW_00_metrics.Rmd`) to the CAMELS-IND-Proj LSTM series cached by
 `BENCH_00_ingest_lstm.Rmd` (`data_processed/bench/q_lstm/<id>.rds`), and
 compares against our Track-A models on the shared evaluation window
-2001--2014 (historical per-GCM LSTM runs) :
+2001--2014 (historical per-GCM LSTM runs):
 
 * **Leg 1 (skill audit):** LSTM historical streamflow vs observed Q --
   logNSE etc. per catchment x GCM. Comparison basis: GR4J CMIP-driven
-  metrics (`LOWFLOW_00`) and GR6J CMIP-driven metrics (when the GR6J CMIP
-  pass exists) -- per-catchment per-metric medians across models, on the
-  shared catchment set. **LSTM is never treated as observed.**
-* **Leg 2 (projected change):** LSTM 2015--2100 low-flow metrics per SSP
-  window (near/mid/long) vs the LSTM historical baseline -- the projected
-  low-flow change envelope of the benchmark, ready for later comparison
-  with our SSP pipeline (QED_50 -> GR4J/GR6J).
+  metrics (`LOWFLOW_00`) -- per-catchment per-metric medians across models,
+  on the shared catchment set and, separately, on the GCM intersection
+  (BENCH_00 established that the benchmark shares only 8 of our 14
+  shortlisted GCMs; a like-for-like comparison must respect that).
+  **LSTM is never treated as observed.**
+* **Leg 2 (projected change):** LSTM 2015--2100 low-flow summaries per SSP
+  window (near/mid/long) against the LSTM historical baseline 1980--2014 --
+  the projected low-flow change envelope of the benchmark, ready for later
+  comparison with our SSP pipeline (QED_50 -> GR4J/GR6J).
 
 **H5 decision rule (pre-registered in AGENTS.md):** "LSTM projections do
 not uniformly beat GR4J/GR6J at low flows (esp. semi-arid, hard-rock)".
@@ -39,8 +41,11 @@ metric; stratification by aridity tercile is included (the semi-arid/hard-
 rock claim must be checked, not assumed).
 
 **Guards:** catchments without a BENCH_00 cache are logged, never dropped
-silently; GCM-name overlap between their 13 and our 22 is checked and
-logged; every LSTM-derived row is stamped `source = "Track B benchmark"`.
+silently; GCM-name mismatches between their 13 and our 14 are logged with the
+alias map used; every LSTM-derived row is stamped `source = "Track B
+benchmark"`. The GR6J leg of the rule is **evaluated** whenever the GR6J
+CMIP-driven metric pass exists (`GR6J_40_cmip_metrics.Rmd`) and reported as
+**pending** otherwise -- it is never silently replaced by GR4J.
 
 ```{r log-file}
 bench_output_dir <- file.path(hyd_project_root, "data_processed", "bench")
@@ -137,10 +142,11 @@ cat("catchments with LSTM cache:", length(ids_cached), "\n")
 # provenance check on the first cache (schema contract of BENCH_00)
 probe <- readRDS(file.path(q_dir, paste0(ids_cached[1], ".rds")))
 stopifnot(identical(probe$source, "CAMELS-IND-Proj LSTM (Track B benchmark)"),
-          !is.null(probe$series))
-cat("provenance OK | doi:", probe$doi, "| unit:", probe$unit, "\n")
-cat("series keys (zip-relative paths) for", ids_cached[1], ":\n")
-print(utils::head(names(probe$series), 12))
+          !is.null(probe$series), !is.null(probe$proj))
+cat("provenance OK | doi:", probe$doi, "\n| unit:", probe$unit, "\n")
+cat("historical series keys for", ids_cached[1], ":\n")
+print(names(probe$series))
+cat("projection summary rows:", nrow(probe$proj), "\n")
 ```
 
 ## 3. Leg 1 -- skill audit on the historical overlap (2001-2014)
@@ -158,24 +164,24 @@ for (cid in ids_cached) {
       next
    }
    obs <- data.table::fread(obsf, select = c("date", "Qobs_mm"))
+   obs[, date := as.Date(date)]
    for (key in names(x$series)) {
+      # BENCH_00 caches historical daily series only; projections are
+      # carried as window summaries in x$proj (Leg 2).
+      if (grepl("ssp[0-9]+", key)) next
       s_dt <- x$series[[key]]
-      # historical series are identified by the absence of an ssp token;
-      # projections carry ssp126/245/370/585 -- split by the key name
-      is_hist <- !grepl("ssp[0-9]+", key)
-      if (!is_hist) next
-      dt <- data.table::data.table(date = s_dt$date, q = s_dt[[2]])
-      # evaluation window rows only; merge with obs on date
+      dt <- data.table::data.table(date = as.Date(s_dt$date), q = s_dt$q)
       m <- merge(obs, dt, by = "date")
-      m <- m[as.Date(date) >= low_eval_start & as.Date(date) <= low_eval_end]
-      vals <- low_metrics_of(as.Date(m$date), m$Qobs_mm, m$q)
+      m <- m[date >= low_eval_start & date <= low_eval_end]
+      if (!nrow(m)) next
+      vals <- low_metrics_of(m$date, m$Qobs_mm, m$q)
       rows[[length(rows) + 1L]] <- data.table::data.table(
          catchment = cid, gcm = key, structure = "LSTM",
          source = "Track B benchmark", metric = low_metrics_vec,
          value = round(as.numeric(vals), 5), window = "valid",
          period = paste(format(low_eval_start), format(low_eval_end), sep = "-"),
-         n_gap_filled = sum(is.na(dt$q)), extrapolation_share = 0,
-         metric_version = metric_version)
+         n_eval_days = nrow(m), n_gap_filled = sum(is.na(dt$q)),
+         extrapolation_share = 0, metric_version = metric_version)
    }
 }
 lstm_skill <- data.table::rbindlist(rows, use.names = TRUE)
@@ -186,9 +192,13 @@ if (length(excl)) data.table::fwrite(
    file.path(hyd_project_root, "data_processed", "logs",
              "BENCH_10_exclusions.csv"))
 cat("LSTM skill rows:", nrow(lstm_skill), "| excluded:", length(excl), "\n")
+cat("LSTM GCM keys:", data.table::uniqueN(lstm_skill$gcm), "\n")
+print(lstm_skill[, .(n = .N, median_logNSE = round(stats::median(
+   value[metric == "logNSE"], na.rm = TRUE), 3)),
+   by = .(gcm = sub("/historical$", "", gcm))])
 ```
 
-## 4. Comparison against Track-A models (shared catchment set)
+## 4. Comparison against Track-A models (shared catchment + GCM intersection)
 
 ```{r compare, eval=TRUE}
 gr4j <- data.table::fread(file.path(hyd_project_root, "data_processed",
@@ -197,65 +207,139 @@ gr4j <- data.table::fread(file.path(hyd_project_root, "data_processed",
 gr4j[, structure := "GR4J"]
 gr4j[, source := "Track A (QED-corrected CMIP6)"]
 
-# GCM-name extraction: cache keys are zip-relative paths; match the longest
-# known model name inside the key (candidates = our 22 models)
-our_models <- data.table::fread(file.path(hyd_qed_dir,
-                                          "model_ranking_overall.csv"))$model
-extract_gcm <- function(key) {
-   hits <- our_models[vapply(our_models, function(m)
-      grepl(m, key, fixed = TRUE), logical(1))]
-   if (!length(hits)) NA_character_ else hits[which.max(nchar(hits))]
-}
-lstm_skill[, gcm_name := extract_gcm(gcm[1]), by = gcm]
-unmatched <- unique(lstm_skill[is.na(gcm_name), gcm])
+# GCM names: the benchmark key is "<their GCM>/historical". One model is named
+# differently on their side (resolution suffix dropped) -- map it explicitly
+# and log the map, rather than silently losing that GCM.
+bench_alias <- c("EC-Earth3-Veg" = "EC-Earth3-Veg-LR")
+lstm_skill[, gcm_name := sub("/historical$", "", gcm)]
+lstm_skill[gcm_name %in% names(bench_alias),
+           gcm_name := bench_alias[gcm_name]]
+our_gcms <- unique(gr4j$model)
+lstm_skill[, in_our_pool := gcm_name %in% our_gcms]
+unmatched <- unique(lstm_skill[in_our_pool == FALSE, gcm_name])
 if (length(unmatched)) {
-   bench_log(paste0("keys with no matching model name (excluded from the",
-                    " win-rate, logged): ", paste(unmatched, collapse = " | ")))
-   data.table::fwrite(data.table::data.table(module = "BENCH_10",
-      reason_code = "gcm_name_unmatched", detail = unmatched),
+   bench_log(paste0("benchmark GCMs with no Track-A counterpart (excluded ",
+                    "from the win-rate, logged): ", paste(unmatched, collapse = " | ")))
+   data.table::fwrite(data.table::data.table(
+      module = "BENCH_10", reason_code = "gcm_no_track_a_counterpart",
+      detail = unmatched),
       file.path(hyd_project_root, "data_processed", "logs",
                 "BENCH_10_gcm_names.csv"))
 }
-lstm_ok <- lstm_skill[!is.na(gcm_name)]
-cat("keys matched to a known model:", data.table::uniqueN(lstm_ok$gcm_name),
-    "of", data.table::uniqueN(lstm_skill$gcm), "\n")
+lstm_ok <- lstm_skill[in_our_pool == TRUE]
+shared_gcms <- sort(unique(lstm_ok$gcm_name))
+cat("benchmark GCMs matched to Track A:", length(shared_gcms),
+    "->", paste(shared_gcms, collapse = ", "), "\n")
+bench_log(paste0("H5 like-for-like GCM intersection (", length(shared_gcms),
+                 "): ", paste(shared_gcms, collapse = ",")))
 
 common_catch <- intersect(unique(lstm_ok$catchment), unique(gr4j$catchment))
 cat("shared catchments (LSTM cache x our roster):", length(common_catch), "\n")
 
-# per-catchment median across each side's own GCM set, per metric
 med_of <- function(dt) dt[!is.na(value),
                           .(value = stats::median(value)),
                           by = .(catchment, metric)]
 m_lstm <- med_of(lstm_ok[catchment %in% common_catch])
-m_gr4j <- med_of(gr4j[catchment %in% common_catch])
 
-cmp <- merge(m_lstm, m_gr4j, by = c("catchment", "metric"),
-             suffixes = c("_lstm", "_gr4j"))
-stopifnot(nrow(cmp) > 0)
-# better: higher for logNSE, closer to zero for % bias metrics
-cmp[, lstm_better := if (metric[1] == "logNSE")
-        value_lstm > value_gr4j else abs(value_lstm) < abs(value_gr4j),
-    by = .(catchment, metric)]
-
-# aridity stratification when GR6J_30 has produced the terciles
+# aridity stratification from the GR6J structural axis (observed-driven).
+# colClasses is not cosmetic: fread silently parses "03005" as integer 3005,
+# which would make every catchment join fail (or silently mis-join).
 arid_fp <- file.path(hyd_project_root, "data_processed", "gr6j",
                      "struct_metrics.csv")
+arid <- NULL
 if (file.exists(arid_fp)) {
    arid <- unique(data.table::fread(arid_fp,
-                  select = c("catchment", "arid_tercile")))
-   cmp <- merge(cmp, arid, by = "catchment", all.x = TRUE)
+                  select = c("catchment", "arid_tercile"),
+                  colClasses = list(character = "catchment")))
 }
-win_rate <- cmp[, .(lstm_win_share = round(mean(lstm_better), 3), n = .N),
-                by = .(metric, arid_tercile = if ("arid_tercile" %in% names(cmp))
-                          arid_tercile else "all")]
+
+# win rate of the LSTM cross-model median against ONE Track-A structure
+win_vs <- function(m_other, label) {
+   cmp <- merge(m_lstm, m_other, by = c("catchment", "metric"),
+                suffixes = c("_lstm", "_ta"))
+   if (!nrow(cmp)) return(NULL)
+   # defensive: catchment ids are zero-padded strings; keep them strings
+   cmp$catchment <- as.character(cmp$catchment)
+   if (!is.null(arid)) {
+      arid$catchment <- as.character(arid$catchment)
+      cmp <- merge(cmp, arid, by = "catchment", all.x = TRUE)
+   }
+   # better: higher for logNSE, closer to zero for % bias metrics
+   cmp[, lstm_better := if (metric[1] == "logNSE")
+           value_lstm > value_ta else abs(value_lstm) < abs(value_ta),
+       by = .(catchment, metric)]
+   if (!is.null(arid)) cmp <- merge(cmp, arid, by = "catchment", all.x = TRUE)
+   cmp[, compared_with := label]
+   cmp
+}
+
+cmp_gr4j <- win_vs(med_of(gr4j[catchment %in% common_catch]), "GR4J")
+stopifnot(nrow(cmp_gr4j) > 0)
+
+# GR6J leg of the pre-registered rule: evaluated only if the GR6J CMIP-driven
+# metric pass exists (GR6J_40_cmip_metrics.Rmd); otherwise reported as PENDING.
+gr6j_fp <- file.path(hyd_project_root, "data_processed", "gr6j", "lowflow",
+                     "lowflow_metrics_gr6j.csv")
+have_gr6j <- file.exists(gr6j_fp)
+cmp_all <- cmp_gr4j
+if (have_gr6j) {
+   gr6j <- data.table::fread(gr6j_fp, colClasses = list(character = "catchment"))
+   gr6j[, structure := "GR6J"]
+   cmp_gr6j <- win_vs(med_of(gr6j[catchment %in% common_catch]), "GR6J")
+   cmp_all <- data.table::rbindlist(list(cmp_gr4j, cmp_gr6j),
+                                    use.names = TRUE, fill = TRUE)
+   bench_log("GR6J CMIP-driven metric pass found -- BOTH legs of the H5 rule evaluated")
+} else {
+   bench_log(paste0("GR6J CMIP-driven metric pass absent (", gr6j_fp,
+                    ") -- H5 GR6J leg reported as PENDING, not substituted"))
+}
+cmp <- cmp_gr4j
+
+win_rate <- cmp_all[, .(lstm_win_share = round(mean(lstm_better), 3), n = .N),
+                    by = .(compared_with, metric,
+                           arid_tercile = if ("arid_tercile" %in% names(cmp_all))
+                              arid_tercile else "all")]
 data.table::fwrite(win_rate, file.path(bench_output_dir,
                                        "h5_lstm_win_rates.csv"))
 print(win_rate)
 
-# H5 verdict: falsified iff LSTM wins EVERY metric on the shared set
+# metric de-duplication guard (AGENTS.md rule 5): never composite
+# near-duplicate metrics -- report the pairwise rank correlation matrix.
+wide <- data.table::dcast(cmp, catchment ~ metric, value.var = "value_lstm")
+mets <- setdiff(names(wide), "catchment")
+rho <- stats::cor(wide[, ..mets], method = "spearman", use = "pairwise.complete.obs")
+cat("\npairwise Spearman rho among metrics (LSTM side):\n"); print(round(rho, 3))
+dup_pairs <- which(abs(rho) > 0.9 & upper.tri(rho), arr.ind = TRUE)
+if (nrow(dup_pairs)) {
+   for (k in seq_len(nrow(dup_pairs))) {
+      bench_log(paste0("metric de-dup check: ", mets[dup_pairs[k, 1]], " vs ",
+                       mets[dup_pairs[k, 2]], " rho = ",
+                       round(rho[dup_pairs[k, 1], dup_pairs[k, 2]], 3),
+                       " (> 0.9) -- do not composite these two"))
+   }
+}
+
+# H5 verdict: falsified iff LSTM wins EVERY metric against EVERY structure
+# that has a CMIP-driven pass (GR4J always; GR6J when GR6J_40 has run).
 all_won <- all(win_rate$lstm_win_share > 0.5)
-h5_verdict <- if (all_won) "H5 FALSIFIED -- LSTM dominates on all low-flow metrics (publish as benchmark confirmation, framed as such)" else paste0("H5 STANDS -- LSTM does not uniformly beat GR4J at low flows (metrics where LSTM wins overall: ", paste(win_rate[lstm_win_share > 0.5, metric], collapse = ", "), ")")
+gr6j_note <- if (have_gr6j) {
+   "GR6J leg: EVALUATED (GR6J_40 CMIP-driven metric pass present)."
+} else {
+   "GR6J leg: PENDING (no GR6J CMIP-driven metric pass yet). The rule names GR4J and GR6J; the GR6J half is reported as pending rather than silently replaced by GR4J."
+}
+h5_verdict <- if (all_won) {
+   paste0("H5 FALSIFIED -- LSTM dominates on all low-flow metrics against ",
+          paste(unique(win_rate$compared_with), collapse = " and "),
+          " (publish as benchmark confirmation, framed as such)")
+} else {
+   paste0("H5 STANDS -- LSTM does not uniformly beat ",
+          paste(unique(win_rate$compared_with), collapse = "/"),
+          " at low flows (cells where LSTM wins: ",
+          paste(win_rate[lstm_win_share > 0.5,
+                         paste0(compared_with, ":", metric, ":", arid_tercile)],
+                collapse = ", "), ")")
+}
+bench_log(paste("H5 verdict:", h5_verdict))
 
 writeLines(c(
    "# H5 verdict -- LSTM benchmark vs GR4J at low flows",
@@ -267,54 +351,69 @@ writeLines(c(
           "models, shared catchment set, 2001-2014."),
    "",
    paste0("**Shared catchments:** ", length(common_catch),
-          " | LSTM models matched: ", data.table::uniqueN(lstm_ok$gcm_name)),
+          " | benchmark GCMs with a Track-A counterpart: ", length(shared_gcms),
+          " (", paste(shared_gcms, collapse = ", "), ")"),
+   paste0("**Benchmark GCMs with no Track-A counterpart (excluded, logged):** ",
+          if (length(unmatched)) paste(unmatched, collapse = ", ") else "none"),
    "",
    paste0("**Verdict: ", h5_verdict, "**"),
    "",
-   "Win rates per metric (share of catchments where the LSTM cross-model ",
-   "median beats the GR4J cross-model median; stratified by aridity when ",
-   "GR6J_30 terciles exist):",
+   paste0("**GR6J leg:** ", gr6j_note),
+   "",
+   paste0("Win rates per metric and structure (share of catchments where the ",
+          "LSTM cross-model median beats that structure's cross-model median; ",
+          "stratified by aridity tercile):"),
    "",
    knitr::kable(win_rate),
    "",
-   "GR6J comparison joins here once the GR6J CMIP-driven metric pass exists;",
-   "the same win-rate construction applies. LSTM is never treated as observed;",
-   "Track B is benchmark-only (AGENTS.md two-track design)."),
+   paste0("Metric de-duplication check (AGENTS.md rule 5): pairwise Spearman ",
+          "rho among the five v1 metrics is reported in `bench_10_log.txt`; ",
+          "no composite score is formed here."),
+   "",
+   "LSTM is never treated as observed; Track B is benchmark-only",
+   "(AGENTS.md two-track design)."),
    file.path(bench_output_dir, "h5_verdict.md"))
-bench_log(paste("H5 verdict written:", h5_verdict))
 ```
 
 ## 5. Leg 2 -- projected low-flow change envelope (2015-2100)
 
 ```{r leg2, eval=TRUE}
-base_rows <- list(); proj_rows <- list()
+# BENCH_00 stores per-SSP window summaries (q05/q10/q50/min-MAM7/mean) in
+# `proj`; the baseline is the historical daily record 1980-2014.
+proj_rows <- list(); base_rows <- list()
 for (cid in ids_cached) {
    x <- readRDS(file.path(q_dir, paste0(cid, ".rds")))
    for (key in names(x$series)) {
-      if (grepl("ssp[0-9]+", key)) {
-         dt <- x$series[[key]]
-         d  <- as.Date(dt$date)
-         # window means of the low-flow index: 10th percentile of daily flow
-         for (w in list(near = c("2015-01-01", "2040-12-31"),
-                        mid  = c("2041-01-01", "2060-12-31"),
-                        long = c("2081-01-01", "2100-12-31"))) {
-            i <- d >= as.Date(w[1]) & d <= as.Date(w[2])
-            if (!any(i)) next
-            ssp <- regmatches(key, regexpr("ssp[0-9]+", key))
-            proj_rows[[length(proj_rows) + 1L]] <- data.table::data.table(
-               catchment = cid, gcm = key, ssp = ssp, window = w[1],
-               q10pct_mm = round(stats::quantile(dt[[2]][i], 0.10,
-                                                 na.rm = TRUE), 5),
-               mam7_mm = round(min(data.table::frollmean(
-                  dt[[2]][i], n = 7), na.rm = TRUE), 5))
-         }
-      }
+      g <- sub("/historical$", "", key)
+      qh <- x$series[[key]]$q
+      base_rows[[length(base_rows) + 1L]] <- data.table::data.table(
+         catchment = cid, gcm = g,
+         q10_base = stats::quantile(qh, 0.10, names = FALSE, na.rm = TRUE),
+         mam7_base = min(data.table::frollmean(qh, 7), na.rm = TRUE))
    }
+   if (nrow(x$proj)) proj_rows[[length(proj_rows) + 1L]] <- x$proj
 }
+base_dt <- data.table::rbindlist(base_rows, use.names = TRUE)
 lstm_proj <- data.table::rbindlist(proj_rows, use.names = TRUE)
+lstm_proj <- merge(lstm_proj, base_dt, by = c("catchment", "gcm"), all.x = TRUE)
+lstm_proj[, q10_change_pct  := round(100 * (q10_mm  - q10_base)  / q10_base, 3)]
+lstm_proj[, mam7_change_pct := round(100 * (mam7_mm - mam7_base) / mam7_base, 3)]
 data.table::fwrite(lstm_proj, file.path(bench_output_dir,
                                         "bench_lstm_proj_lowflow.csv"))
 cat("projection rows:", nrow(lstm_proj), "\n")
+
+# envelope: median change across catchments and GCMs, per SSP x window
+envelope <- lstm_proj[is.finite(mam7_change_pct),
+   .(n = .N,
+     q10_change_pct_med  = round(stats::median(q10_change_pct), 2),
+     mam7_change_pct_med = round(stats::median(mam7_change_pct), 2)),
+   by = .(ssp, window)][order(ssp, window)]
+data.table::fwrite(envelope, file.path(bench_output_dir,
+                                       "bench_lstm_proj_envelope.csv"))
+print(envelope)
+bench_log(paste0("LSTM projected low-flow envelope written: ",
+                 nrow(lstm_proj), " rows across ",
+                 data.table::uniqueN(lstm_proj$ssp), " SSPs"))
 ```
 
 ## Take-away
@@ -322,9 +421,10 @@ cat("projection rows:", nrow(lstm_proj), "\n")
 - `bench_lstm_skill.csv` + `h5_lstm_win_rates.csv` + `h5_verdict.md` --
   the H5 audit; the paper reports win rates per metric (stratified,
   transparent), never a single blended score.
-- `bench_lstm_proj_lowflow.csv` -- the LSTM projected low-flow envelope
-  (per GCM x SSP x window), the benchmark object for the SSP-phase
-  comparison against our GR4J/GR6J projections.
+- `bench_lstm_proj_lowflow.csv` / `bench_lstm_proj_envelope.csv` -- the LSTM
+  projected low-flow envelope (per GCM x SSP x window, with % change against
+  the 1980--2014 historical baseline), the benchmark object for the
+  SSP-phase comparison against our GR4J/GR6J projections.
 - If H5 is falsified (LSTM wins everywhere): report it as benchmark
   confirmation from the outset -- the framework's value then rests on the
   process-based uncertainty decomposition (H4) and the mechanism audit,

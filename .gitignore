@@ -26,6 +26,17 @@ data_processed/hyd/model_inputs/
 data_processed/ssp/qm_params/
 data_processed/ssp/qm_corrected/
 
+# ---- low-flow / propagation / GR6J bulk series (GBs; regenerate) ----
+data_processed/lowflow/series/
+data_processed/prop/qsim_full/
+data_processed/gr6j/params/
+data_processed/gr6j/series/
+data_processed/gr6j/lowflow/series/
+
+# ---- Track-B benchmark bulk series (3.6 GB; regenerate with BENCH_00) ----
+data_processed/bench/q_lstm/
+data_processed/bench/q_stage/
+
 # ---- rendered notebooks (regenerate by knitting) ----
 *.html
 
