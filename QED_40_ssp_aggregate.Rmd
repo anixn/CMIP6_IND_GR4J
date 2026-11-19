@@ -129,6 +129,14 @@ year_of  <- as.integer(sub("^.*_([0-9]{4})_v.*$", "\\1", basename(fl)))
 
 # keep only our variables and shortlisted models x scenarios
 keep <- var_of %in% qed_vars & model_of %in% models_ssp & ssp_of %in% qed_ssp_list
+extra_models <- setdiff(unique(model_of[var_of %in% qed_vars &
+                                        ssp_of %in% qed_ssp_list]), models_ssp)
+if (length(extra_models)) {
+   qed_log(paste("NOTE: non-shortlist models present on disk and ignored:",
+                 paste(sort(extra_models), collapse = ", ")), qed_ssp_log_file)
+   cat("Non-shortlist models on disk (ignored by design):",
+       paste(sort(extra_models), collapse = ", "), "\n")
+}
 fl   <- fl[keep]
 var_of <- var_of[keep]; model_of <- model_of[keep]
 ssp_of <- ssp_of[keep]; year_of <- year_of[keep]
