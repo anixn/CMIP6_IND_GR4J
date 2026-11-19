@@ -73,9 +73,25 @@ stopifnot(file.exists(bench_zip_fp))
 zip_size <- as.double(file.size(bench_zip_fp))
 bench_log(paste0("zip size on disk: ", zip_size, " bytes (expected ",
                  bench_expected_bytes, ")"))
+# Multi-connection downloaders (aria2c) write sparse segments ahead of the
+# completed bytes, so an almost-full file size proves nothing. Two guards:
+#   (a) no aria2 control file may remain (it exists while downloading),
+#   (b) the archive must pass a real integrity test before unpacking.
+aria2_ctrl <- paste0(bench_zip_fp, ".aria2")
+if (file.exists(aria2_ctrl)) stop(paste0(
+   "download still in progress: aria2 control file present (", aria2_ctrl,
+   "). Wait for aria2c to exit cleanly."))
 if (zip_size < bench_expected_bytes) stop(paste0(
    "zip incomplete: ", zip_size, " < ", bench_expected_bytes,
    " bytes -- resume the download before running BENCH_00"))
+bench_log("running zip integrity test (unzip -t) ...")
+test_out <- system2("unzip", c("-t", shQuote(bench_zip_fp)),
+                    stdout = TRUE, stderr = TRUE)
+test_status <- attr(test_out, "status")
+if (!is.null(test_status) && test_status != 0) stop(paste0(
+   "zip integrity test FAILED (unzip -t exit ", test_status, "): ",
+   paste(utils::tail(test_out, 3), collapse = " | ")))
+bench_log("zip integrity test passed")
 
 if (!dir.exists(bench_extract)) {
    utils::unzip(bench_zip_fp, exdir = bench_extract, overwrite = FALSE)
