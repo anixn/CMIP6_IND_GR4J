@@ -26,6 +26,10 @@ data_processed/hyd/model_inputs/
 data_processed/ssp/qm_params/
 data_processed/ssp/qm_corrected/
 
+# ---- SSP aggregation CSVs (~100 MB each, 168 combos; regenerate with ----
+# ---- QED_40_ssp_aggregate.Rmd from the raw nc archive)                ----
+data_processed/ssp/agg_*.csv
+
 # ---- low-flow / propagation / GR6J bulk series (GBs; regenerate) ----
 data_processed/lowflow/series/
 data_processed/prop/qsim_full/

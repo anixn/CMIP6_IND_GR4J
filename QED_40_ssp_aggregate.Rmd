@@ -19,11 +19,14 @@ the raw CMIP6 scenario NetCDF daily files into wide catchment-mean CSVs that
 the SSP quantile-mapping notebook (`QED_50_ssp_apply.Rmd`, to be written) will
 read:
 
-* input dir: the flat download root
-  `D:/Datasets/Download_CMIP/data_raw/cmip6/` (files land flat there, unlike
-  the historical archive which is organised into `pr/`, `tasmax/`, `tasmin/`
-  subfolders). Same naming convention:
-  `<var>_day_<model>_<ssp>_<member>_<grid>_<year>_v<ver>.nc`;
+* input dir: the SSP download root, **searched recursively** so that either
+  layout works -- the original flat `data_raw/cmip6/` and the
+  variable-major layout `Download_CMIP/SSP/<var>/` adopted on 20 Nov 2026
+  (`download_cmip6_ssp.R` now downloads one variable at a time into its own
+  folder). Same naming convention in both:
+  `<var>_day_<model>_<ssp>_<member>_<grid>_<year>_v<ver>.nc` -- the variable
+  is taken from the filename, never from the folder, so a mis-filed download
+  cannot be silently mis-aggregated;
 * models: the **14 hybrid-shortlisted** models from
   `data_processed/hyd/model_shortlist_final.csv` (`selected == 1`) --
   NOT all 22 historical models (the selection is already done);
@@ -60,6 +63,25 @@ read:
    combo) gets a log line AND a row in
    `data_processed/logs/QED_40_ssp_exclusions.csv` -- no silent drops.
 
+**Incremental-run rules (added 20 Nov 2026, while the SSP download is still in
+progress).** The notebook is now safe to run at any point before the grid is
+complete, and it is idempotent:
+
+5. **A combo is aggregated only when all 66 window years are present**
+   (`qed_ssp_min_years`). A half-downloaded combo would otherwise produce a
+   CSV whose missing windows are NA, and NA-window low-flow metrics are not
+   low-flow metrics. Incomplete combos are logged with their year count and
+   skipped; the next run picks them up when they finish. `QED_50` already
+   degrades to `skipped_ssp_agg_missing`, so no downstream module needs to
+   change.
+6. **Every input file is validated by magic bytes before `terra::rast()`.** On
+   19-20 Nov 2026 several ESGF THREDDS nodes returned a Java stack trace
+   (`StorageExceptionNotActive`) as the HTTP body; the downloader wrote it to
+   disk as `<name>.nc`. A real netCDF-4/HDF5 file starts with
+   `89 48 44 46 0D 0A 1A 0A`, netCDF-3 classic with `CDF\x01`. Anything else
+   is an error page and is excluded with reason `not_netcdf_error_page` --
+   it must never reach `terra` and must never look like a missing year.
+
 ```{r log-file}
 qed_ssp_agg_dir <- file.path(qed_project_root, "data_processed", "ssp")
 dir.create(qed_ssp_agg_dir, recursive = TRUE, showWarnings = FALSE)
@@ -69,8 +91,14 @@ qed_ssp_log_file <- file.path(qed_ssp_agg_dir, "qed_40_log.txt")
 ## 1. SSP configuration
 
 ```{r ssp-config}
-# Raw nc root (flat layout from download_cmip6_ssp.R)
-qed_ssp_raw_dir <- "D:/Datasets/Download_CMIP/data_raw/cmip6"
+# Raw nc roots, searched recursively in order. The variable-major layout
+# (Download_CMIP/SSP/<var>/) replaced the flat data_raw/cmip6/ root on
+# 20 Nov 2026; both are accepted so an in-flight reorganisation cannot break
+# the notebook.
+qed_ssp_raw_roots <- c("D:/Datasets/Download_CMIP/SSP",
+                       "D:/Datasets/Download_CMIP/data_raw/cmip6")
+qed_ssp_raw_roots <- qed_ssp_raw_roots[dir.exists(qed_ssp_raw_roots)]
+stopifnot(length(qed_ssp_raw_roots) > 0)
 
 # Scenarios: AR6 core matrix
 qed_ssp_list <- c("ssp126", "ssp245", "ssp370", "ssp585")
@@ -84,6 +112,9 @@ qed_ssp_windows <- list(
 
 # Smoke-test mode: 1 model x 1 ssp x 10 catchments. FALSE for production.
 qed_ssp_test_mode <- FALSE
+
+# Completeness gate (rule 5): a combo is aggregated only with all 66 years.
+qed_ssp_min_years <- 66L
 ```
 
 ```{r ssp-model-list}
@@ -115,17 +146,46 @@ cat("SSP grid:", n_days_ssp, "window days (gap 2061-2080 excluded by design)\n")
 ## 3. Discover SSP files in the raw archive
 
 ```{r discover}
-# Files land flat: <var>_day_<model>_<ssp>_<member>_<grid>_<year>_v<ver>.nc
+# Files land as <var>_day_<model>_<ssp>_<member>_<grid>_<year>_v<ver>.nc,
+# either flat or under a per-variable folder -- search recursively.
 # token 3 = model, token 4 = ssp, year from the _YYYY_v pattern (as in QED_05)
-fl <- list.files(qed_ssp_raw_dir, pattern = "_day_.*_ssp[0-9]+_.*\\.nc$",
-                 full.names = TRUE)
+fl <- unlist(lapply(qed_ssp_raw_roots, function(d)
+   list.files(d, pattern = "_day_.*_ssp[0-9]+_.*\\.nc$", full.names = TRUE,
+              recursive = TRUE)))
+fl <- unique(fl)
 stopifnot(length(fl) > 0)
+cat("raw SSP nc files found under", length(qed_ssp_raw_roots), "root(s):",
+    length(fl), "\n")
 
 tok  <- strsplit(basename(fl), "_")
 var_of   <- vapply(tok, `[`, character(1), 1)
 model_of <- vapply(tok, `[`, character(1), 3)
 ssp_of   <- vapply(tok, `[`, character(1), 4)
 year_of  <- as.integer(sub("^.*_([0-9]{4})_v.*$", "\\1", basename(fl)))
+
+# ---- magic-byte validation (rule 6): an ESGF error page is not a year ------
+# HDF5 magic (netCDF-4) = 89 48 44 46 0D 0A 1A 0A ; netCDF-3 classic = CDF\x01
+HDF5_MAGIC <- as.raw(c(0x89, 0x48, 0x44, 0x46, 0x0D, 0x0A, 0x1A, 0x0A))
+CDF1_MAGIC <- as.raw(c(0x43, 0x44, 0x46, 0x01))
+is_nc <- vapply(fl, function(f) {
+   h <- tryCatch(readBin(f, what = "raw", n = 8L), error = function(e) raw(0))
+   (length(h) >= 8L && identical(h[1:8], HDF5_MAGIC)) ||
+      (length(h) >= 4L && identical(h[1:4], CDF1_MAGIC))
+}, logical(1))
+if (any(!is_nc)) {
+   bad <- data.table::data.table(
+      module = "QED_40", catchment = NA_character_,
+      reason_code = "not_netcdf_error_page",
+      detail = paste0(basename(fl[!is_nc]), "|",
+                      file.size(fl[!is_nc]), "B"))
+   qed_log(paste("EXCLUDED", sum(!is_nc),
+                 "files that are not netCDF (ESGF error pages, not data)"),
+           qed_ssp_log_file)
+   fl <- fl[is_nc]; var_of <- var_of[is_nc]; model_of <- model_of[is_nc]
+   ssp_of <- ssp_of[is_nc]; year_of <- year_of[is_nc]
+} else {
+   bad <- NULL
+}
 
 # keep only our variables and shortlisted models x scenarios
 keep <- var_of %in% qed_vars & model_of %in% models_ssp & ssp_of %in% qed_ssp_list
@@ -146,30 +206,48 @@ cat(length(fl), "SSP nc files on disk for the", length(models_ssp), "x",
 # what is present vs expected (14 models x 4 ssps x 3 vars x 66 years)
 expected_years <- sort(unique(unlist(lapply(qed_ssp_windows,
    function(w) as.integer(format(w[1], "%Y")):as.integer(format(w[2], "%Y"))))))
-ssp_files <- split(seq_along(fl), list(var = var_of, model = model_of,
-                                       ssp = ssp_of))
-# exclusions log: any combo with NO file at all, and any missing year
-excl <- list()
-have_combo <- paste(var_of, model_of, ssp_of, sep = "|")
+# Explicit "var|model|ssp" key: split() would join the three factors with "."
+# by default, which never matches the "|" key used below -- that mismatch made
+# the aggregate loop skip every combo on the first run (0 files written).
+combo_key <- paste(var_of, model_of, ssp_of, sep = "|")
+ssp_files <- split(seq_along(fl), combo_key)
+
+# ---- per-combo status table (rule 5) + exclusions log ----------------------
+# One row per expected combo, always written: this is the download tracker.
+have_combo <- combo_key
+status_rows <- list(); excl <- list()
+if (!is.null(bad)) excl[[length(excl) + 1L]] <- bad
 for (v in qed_vars) for (m in models_ssp) for (s in qed_ssp_list) {
    key <- paste(v, m, s, sep = "|")
-   yrs_here <- year_of[have_combo == key]
+   yrs_here <- unique(year_of[have_combo == key])
+   yrs_here <- yrs_here[yrs_here %in% expected_years]
+   miss <- setdiff(expected_years, yrs_here)
+   status_rows[[length(status_rows) + 1L]] <- data.table::data.table(
+      var = v, model = m, ssp = s,
+      n_years = length(yrs_here), n_expected = length(expected_years),
+      complete = length(yrs_here) >= qed_ssp_min_years)
    if (length(yrs_here) == 0) {
       excl[[length(excl) + 1L]] <- data.table::data.table(
-         module = "QED_40", detail = paste(v, m, s, sep = "|"),
-         reason_code = "combo_absent",
+         module = "QED_40", catchment = NA_character_,
+         reason_code = "combo_absent", detail = key,
          n_missing_years = length(expected_years))
-   } else {
-      miss <- setdiff(expected_years, yrs_here)
-      if (length(miss)) {
-         excl[[length(excl) + 1L]] <- data.table::data.table(
-            module = "QED_40", detail = paste0(key, "|years:",
-                                               paste(miss, collapse = ";")),
-            reason_code = "years_missing",
-            n_missing_years = length(miss))
-      }
+   } else if (length(miss)) {
+      excl[[length(excl) + 1L]] <- data.table::data.table(
+         module = "QED_40", catchment = NA_character_,
+         reason_code = "years_missing",
+         detail = paste0(key, "|years:", paste(miss, collapse = ";")),
+         n_missing_years = length(miss))
    }
 }
+ssp_combo_status <- data.table::rbindlist(status_rows)
+data.table::fwrite(ssp_combo_status,
+                   file.path(qed_ssp_agg_dir, "qed_40_combo_status.csv"))
+cat("Combos complete:", sum(ssp_combo_status$complete), "of",
+    nrow(ssp_combo_status), "| files still missing:",
+    sum(ssp_combo_status$n_expected - ssp_combo_status$n_years), "\n")
+print(ssp_combo_status[, .(complete = sum(complete), combos = .N),
+                       by = var])
+
 excl_dt <- data.table::rbindlist(excl, use.names = TRUE, fill = TRUE)
 if (nrow(excl_dt)) {
    data.table::fwrite(excl_dt,
@@ -221,28 +299,50 @@ unit_is_add <- c(pr = FALSE, tasmax = TRUE,  tasmin = TRUE)
 
 combos <- expand.grid(var = qed_vars, model = models_ssp,
                       ssp = qed_ssp_list, stringsAsFactors = FALSE)
+combos$key <- paste(combos$var, combos$model, combos$ssp, sep = "|")
 # keep only combos with at least one file on disk
-combos$have <- paste(combos$var, combos$model, combos$ssp, sep = "|") %in%
-   names(ssp_files)
+combos$have <- combos$key %in% names(ssp_files)
 combos <- combos[combos$have, ]
-if (qed_ssp_test_mode) combos <- combos[combos$model == models_ssp[1] &
-                                        combos$ssp == qed_ssp_list[1], ]
 
-for (i in seq_len(nrow(combos))) {
-   v <- combos$var[i]; model <- combos$model[i]; s <- combos$ssp[i]
-   idx <- ssp_files[[paste(v, model, s, sep = "|")]]
-   files <- sort(fl[idx])
-   yrs   <- year_of[idx]
-   files <- files[yrs %in% expected_years]
-   yrs   <- yrs[yrs %in% expected_years]
+# completeness gate (rule 5): aggregate only combos with all 66 years
+combos$n_years <- ssp_combo_status$n_years[match(
+   combos$key, paste(ssp_combo_status$var, ssp_combo_status$model,
+                     ssp_combo_status$ssp, sep = "|"))]
+n_incomplete <- sum(!is.na(combos$n_years) & combos$n_years < qed_ssp_min_years)
+if (n_incomplete) qed_log(sprintf(
+   "SKIPPED %d incomplete combos (< %d years); see qed_40_combo_status.csv",
+   n_incomplete, qed_ssp_min_years), qed_ssp_log_file)
+combos <- combos[!is.na(combos$n_years) & combos$n_years >= qed_ssp_min_years, ]
 
-   out <- matrix(NA_real_, nrow = n_polys, ncol = n_days_ssp,
+# incremental: a combo already aggregated is not redone (delete its CSV to
+# force a rebuild). This is what makes repeated runs during the download cheap.
+combos$agg_fp <- file.path(qed_ssp_agg_dir,
+   sprintf("agg_%s_%s_%s.csv", combos$var, combos$model, combos$ssp))
+n_done <- sum(file.exists(combos$agg_fp))
+combos <- combos[!file.exists(combos$agg_fp), ]
+cat("Complete combos:", nrow(combos) + n_done, "| already aggregated:",
+    n_done, "| to aggregate now:", nrow(combos), "\n")
+
+if (qed_ssp_test_mode) combos <- utils::head(combos, 1L)
+
+# Optional cap for a smoke test without editing the notebook:
+#   QED_SSP_MAX_COMBOS=2 Rscript -e "rmarkdown::render('QED_40_ssp_aggregate.Rmd')"
+qed_ssp_max_combos <- as.integer(Sys.getenv("QED_SSP_MAX_COMBOS", "0"))
+if (!is.na(qed_ssp_max_combos) && qed_ssp_max_combos > 0L) {
+   combos <- utils::head(combos, qed_ssp_max_combos)
+   cat("capped this run to", nrow(combos), "combos (QED_SSP_MAX_COMBOS)\n")
+}
+
+# ---- one combo, self-contained so a PSOCK worker can run it ---------------
+# Writes the CSV itself; returns a status record (never a silent drop: a combo
+# with any unreadable file is not written and reports every failing file).
+agg_one_combo <- function(job) {
+   out <- matrix(NA_real_, nrow = nrow(polys), ncol = n_days_ssp,
                  dimnames = list(polys$id, ssp_cols))
-   n_files_bad <- 0L
-
-   for (j in seq_along(files)) {
-      f <- files[j]; yr <- yrs[j]
-      res <- tryCatch({
+   errs <- character(0)
+   for (j in seq_along(job$files)) {
+      f <- job$files[j]; yr <- job$yrs[j]
+      ok <- tryCatch({
          r  <- terra::rast(f)
          dt <- qed_ssp_nc_dates(r, yr)
          w  <- cos(terra::init(r, "y") * pi / 180)      # cell-area weights
@@ -250,34 +350,60 @@ for (i in seq_len(nrow(combos))) {
             r, polys, "weighted_mean", weights = w,
             stack_apply = TRUE, progress = FALSE)
          vals <- as.matrix(ex)                          # [n_polys, nl]
-         vals <- if (unit_is_add[[v]]) vals + unit_scale[[v]]
-                 else vals * unit_scale[[v]]
+         vals <- if (unit_is_add[[job$var]]) vals + unit_scale[[job$var]]
+                 else vals * unit_scale[[job$var]]
          idx_day <- match(format(dt, "%Y%m%d"), ssp_cols)  # NA for invalid
          keep <- !is.na(idx_day)
          out[, idx_day[keep]] <- vals[, keep, drop = FALSE]
          TRUE
-      }, error = function(e) {
-         qed_log(paste("ERROR", model, s, v, basename(f),
-                       conditionMessage(e)), qed_ssp_log_file)
-         FALSE
-      })
-      if (!isTRUE(res)) n_files_bad <- n_files_bad + 1L
+      }, error = function(e) conditionMessage(e))
+      if (!isTRUE(ok)) errs <- c(errs, paste0(basename(f), ": ", ok))
    }
-
-   fp <- file.path(qed_ssp_agg_dir,
-                   sprintf("agg_%s_%s_%s.csv", v, model, s))
+   if (length(errs)) {
+      return(list(status = "error", n_bad = length(errs),
+                  detail = paste(errs, collapse = " | ")))
+   }
    dt_out <- data.table::as.data.table(out)
    dt_out[, id := rownames(out)]
    data.table::setcolorder(dt_out, "id")
-   data.table::fwrite(dt_out, fp)
-
-   n_cov  <- sum(!is.na(out[1, ]))
-   n_noleap_na <- sum(is.na(out[1, ]))   # Feb-29 cols of noleap models + gaps
-   qed_log(sprintf("agg %s %s %s: %d/%d files ok, %d/%d window days covered, %d NA",
-                   v, model, s, length(files) - n_files_bad, length(files),
-                   n_cov, n_days_ssp, n_noleap_na), qed_ssp_log_file)
-   cat("done:", v, model, s, "\n")
+   data.table::fwrite(dt_out, job$agg_fp)
+   list(status = "ok", n_bad = 0L, n_cov = sum(!is.na(out[1, ])),
+        n_days = n_days_ssp, fp = job$agg_fp)
 }
+
+jobs <- lapply(seq_len(nrow(combos)), function(i) {
+   idx   <- ssp_files[[combos$key[i]]]
+   files <- sort(fl[idx]); yrs <- year_of[idx]
+   keep  <- yrs %in% expected_years
+   list(var = combos$var[i], model = combos$model[i], ssp = combos$ssp[i],
+        files = files[keep], yrs = yrs[keep], agg_fp = combos$agg_fp[i])
+})
+
+# Sequential on purpose (measured 21 Nov 2026): 472 polygons cost 1.84 s/file,
+# i.e. ~2 min per 66-year combo. A 6-worker PSOCK cluster was tried first and
+# died with `std::bad_alloc` inside terra on a 15.7 GB machine (7.4 GB free),
+# taking the result channel with it. Reliability beats a 3x speed-up here, and
+# the skip-existing rule makes repeat runs cheap.
+qed_ssp_workers <- 1L
+cat("aggregation: sequential,", length(jobs), "combos\n")
+
+results <- lapply(jobs, agg_one_combo)
+
+for (i in seq_along(jobs)) {
+   r <- results[[i]]
+   if (identical(r$status, "ok")) {
+      qed_log(sprintf("agg %s %s %s: %d files ok, %d/%d window days covered",
+                      jobs[[i]]$var, jobs[[i]]$model, jobs[[i]]$ssp,
+                      length(jobs[[i]]$files), r$n_cov, r$n_days),
+              qed_ssp_log_file)
+   } else {
+      qed_log(paste("ERROR", jobs[[i]]$model, jobs[[i]]$ssp, jobs[[i]]$var,
+                    r$detail), qed_ssp_log_file)
+   }
+}
+cat("combos written this run:",
+    sum(vapply(results, function(r) identical(r$status, "ok"), logical(1))),
+    "of", length(jobs), "\n")
 ```
 
 ## 7. Verification
@@ -285,28 +411,35 @@ for (i in seq_len(nrow(combos))) {
 ```{r verify}
 made <- list.files(qed_ssp_agg_dir, pattern = "^agg_(pr|tasmax|tasmin)_.*_ssp[0-9]+\\.csv$",
                    full.names = TRUE)
-base_of  <- tools::file_path_sans_ext(basename(made))
-parts    <- strsplit(base_of, "_")   # agg, var, model..., ssp
-# model names contain "-" but not "_", ssp is the last token
-var_of2  <- vapply(parts, `[`, character(1), 2)
-ssp_of2  <- vapply(parts, `[`, character(1), length(parts[[1]]))
-model_of2 <- vapply(parts, function(p) paste(p[3:(length(p) - 1)], collapse = "_"))
+if (!length(made)) {
+   cat("No complete combo yet -- nothing aggregated.",
+       "Progress is tracked in qed_40_combo_status.csv\n")
+} else {
+   base_of  <- tools::file_path_sans_ext(basename(made))
+   parts    <- strsplit(base_of, "_")   # agg, var, model..., ssp
+   # model names contain "-" but not "_", ssp is the last token
+   var_of2  <- vapply(parts, `[`, character(1), 2)
+   ssp_of2  <- vapply(parts, `[`, character(1), length(parts[[1]]))
+   model_of2 <- vapply(parts, function(p) paste(p[3:(length(p) - 1)], collapse = "_"))
 
-combos_made <- data.table::expand.grid(model = model_of2, ssp = ssp_of2,
-                                       var = var_of2, stringsAsFactors = FALSE)
-n_expected <- nrow(expand.grid(model = models_ssp, ssp = qed_ssp_list,
-                               var = qed_vars))
-cat("Agg files written:", nrow(combos_made), "of", n_expected, "expected\n")
-missing <- data.table::setdiff(
-   data.table::expand.grid(model = models_ssp, ssp = qed_ssp_list,
-                           var = qed_vars, stringsAsFactors = TRUE),
-   combos_made)
-if (nrow(missing)) {
-   cat("MISSING (already logged in QED_40_ssp_exclusions.csv):\n")
-   print(missing)
+   combos_made <- data.table::expand.grid(model = model_of2, ssp = ssp_of2,
+                                          var = var_of2, stringsAsFactors = FALSE)
+   n_expected <- nrow(expand.grid(model = models_ssp, ssp = qed_ssp_list,
+                                  var = qed_vars))
+   cat("Agg files written:", nrow(combos_made), "of", n_expected, "expected\n")
+   missing <- data.table::setdiff(
+      data.table::expand.grid(model = models_ssp, ssp = qed_ssp_list,
+                              var = qed_vars, stringsAsFactors = TRUE),
+      combos_made)
+   if (nrow(missing)) {
+      cat("MISSING (logged in QED_40_ssp_exclusions.csv and",
+          "qed_40_combo_status.csv):\n")
+      print(utils::head(missing, 20))
+   }
+   stopifnot(nrow(combos_made) > 0)   # never wipe outputs on a parse mistake
 }
-stopifnot(nrow(combos_made) > 0)   # never wipe outputs on a parse mistake
-qed_log("QED_40 done", qed_ssp_log_file)
+qed_log(sprintf("QED_40 done: %d agg files on disk", length(made)),
+        qed_ssp_log_file)
 ```
 
 **Handoff contract for `QED_50_ssp_apply.Rmd`:** read these agg files with

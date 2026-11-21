@@ -46,6 +46,7 @@ Scenario-driven water-availability and drought studies over Indian catchments de
 - **CAMELS-IND** (Mangukiya et al. 2025, ESSD 17:461; Zenodo 14999580): daily catchment-mean forcings (pr, tasmax, tasmin), observed streamflow, 211 attributes, 472 catchments, 1981–2014 (12,418 days; forcings complete). Area (`cwc_area`, km²) and latitude (`cwc_lat`) from the topography file.
 - **CMIP6 historical**: daily `pr`, `tasmax`, `tasmin`, 24 models over the Indian domain; CESM2 and IITM-ESM precipitation-only → excluded; **22 all-variable models** form the selection pool. HadGEM3-GC31-MM 360-day calendar handled (invalid Feb 29/30 → NA). Single members (`r1i1p1f1` or nearest).
 - **CMIP6 scenarios (Track A)**: the hybrid-shortlisted **14 models × 4 SSPs (ssp126, ssp245, ssp370, ssp585)** × near (2015–2040), mid (2041–2060), long (2081–2100) windows. ssp370 added 18 Nov 2026 to complete the AR6 core scenario matrix and align with CAMELS-IND-Proj's 4-SSP design.
+- **Scenario acquisition and QC**: 11,088 daily files expected (14 models × 4 SSPs × 3 variables × 66 window years; 2061–2080 never downloaded, by design). Acquisition is variable-major into `Download_CMIP/SSP/{pr,tasmax,tasmin}/` (20 Nov 2026). Two acquisition facts are recorded here because they are data-quality facts, not logistics. (i) Several ESGF THREDDS nodes intermittently returned a Java stack trace (`StorageExceptionNotActive`) as the HTTP body, which the R client wrote to disk as `<name>.nc`; every file is therefore validated by **magic bytes** (`\x89HDF` for netCDF-4/HDF5, `CDF\x01` for netCDF-3) before use, and non-netCDF files are excluded with reason `not_netcdf_error_page`. The 21 Nov scan of the full archive found **0** remaining, i.e. the re-fetches succeeded. (ii) The archive also holds two models dropped from the hybrid shortlist (`GISS-E2-1-G`, `INM-CM5-0`; 831 files), logged and ignored. A model × SSP × variable combo enters the pipeline only when all 66 years are present (§4.3).
 - **CAMELS-IND-Proj** (Singh et al. 2026, Zenodo 21775597, CC BY 4.0; EcoHydro Lab IIT Roorkee): daily LSTM streamflow 2015–2100, 13 GCMs × 4 SSPs, historical-per-GCM runs and forcings included; ~11.3 GB; `filter_catchment_model_scenario.py` for subsetting. **Track B only.** Confidence flags exist for a subset of catchments (239 per the project brief) — *unverified on the public record*; the number and flag semantics must be verified against the downloaded files before any use. **[TODO: survey]**
 
 ## 4. Methods
@@ -58,14 +59,26 @@ Scenario-driven water-availability and drought studies over Indian catchments de
 5. **GR4J hydrological leg**: airGR; Oudin PET; Q[mm/d] = Q[m³/s]×86.4/A[km²]; warm-up 1981; calibrate 1982–2000 (Michel local search on 1−KGE); validate out-of-sample 2001–2014 (KGE/NSE/PBIAS, PBIAS manual); <3,650 valid Q-days → skip and log. 192 of 242 calibrated.
 6. **CMIP-driven discharge evaluation**: calibrated parameters driven with all 22 corrected series; scored on observed 2001–2014 discharge; per-catchment ranks → composite discharge ranking. Leap-day gaps of 365-day-calendar models filled conservatively (pr→0, T→interpolated), counted in `n_gap_filled`.
 
-### 4.2 Phase methods (specified; to be executed — see phase map in `AGENTS.md`)
+### 4.2 Phase methods (O1, O2, O3, O5 executed — verdicts in §5.1–5.4; O4 pending, §4.3)
 - **Low-flow metric layer (O1)**: logNSE, Q95 bias, low-flow volume bias (below observed Q90), dry-spell bias, mean annual 7-day minimum bias — computed 2001–2014 only; composite rank after pairwise ρ>0.9 de-duplication.
 - **GR6J axis (O2)**: GR6J (6 parameters) via airGR, identical inputs/windows/warm-up/optimizer as GR4J, calibrated on the same catchments; divergence `div = GR6J − GR4J` (difference for logNSE; percentage points for the % bias metrics — not divided by GR4J, which would explode near zero biases; documented deviation, pre-registered in `GR6J_00_setup.Rmd`); stratified by aridity tercile (annual PET/P); materiality thresholds pre-registered (logNSE ≥ 0.10 or ≥ 10 pp); direction reported, never claimed as superiority.
 - **Propagation (O3)**: SPI-12/SRI-12 (gamma-MLE + normal-quantile transform, identical convention both sides); propagation time **defined exclusively** as the SPI–SRI cross-correlation lag (0–12 months, ties → smallest) — **never** inferred from SPI≈SRI near-identity (the Machhar-type artefact; mean |SRI−SPI| computed as diagnostic only); tolerance band `|L_model − L_obs| ≤ 1 month` and the falsification rule (all models ≥ 80% reproduced AND spread < 0.10 AND ρ(forcing rank, prop_share) > 0.6) pre-registered in `PROP_PRE_REGISTRATION.md` (18 Nov 2026) **before** any model SRI was computed; observed lags frozen (167 catchments).
 - **Decomposition (O4)**: multi-way ANOVA / variance components of Q95 change, 7-day min change, low-flow volume change ~ GCM × structure × tail policy, blocking by catchment type; bootstrap CIs (≥1000 resamples, recorded seed); responses never blended.
 - **Benchmark (O5)**: same low-flow metric suite applied to CAMELS-IND-Proj historical-per-GCM runs (skill) and 2015–2100 projections (projected change); distributions and per-catchment win rates, stratified by confidence flag and aridity; the LSTM product is benchmarked, never regenerated.
 
-## 5. Preliminary results (historical leg, completed)
+### 4.3 SSP projection leg (the substrate for O4)
+
+Two notebooks, parallel to the historical chain and leaving every `QED_*`/`HYD_*` notebook untouched.
+
+**Aggregation (`QED_40_ssp_aggregate.Rmd`).** Raw daily NetCDF → area-weighted (cos-latitude) catchment means on the 24,206-day window grid (2015–2040 + 2041–2060 + 2081–2100). The 2061–2080 gap is absent by design and travels downstream as a counted gap, never as an interpolated one. Unit handling is identical to the historical leg (pr kg m⁻² s⁻¹ → mm/day, K → °C; the 360-day HadGEM3-GC31-MM calendar is mapped day 1..30 of real months, invalid dates → NA). Three gates protect the output: (i) **magic-byte validation** of every input file (§3), so a server error page can never be read as a year of data; (ii) a **completeness gate** — a combo is aggregated only when all 66 window years are present, because a half-downloaded series would produce NA-window low-flow metrics that are not low-flow metrics; (iii) a **per-combo status table** (`qed_40_combo_status.csv`, 168 rows) that makes partial progress visible instead of inferred. Aggregation is idempotent: a combo already written is skipped, so the notebook can be re-run as acquisition fills, and every incomplete combo is logged with its year count and reason code.
+
+**EQM application (`QED_50_ssp_apply.Rmd`).** EQM is fitted per catchment × variable × season on the **full historical 1981–2014** pair (observed CAMELS-IND reference vs each model's historical aggregate) and applied to each SSP series with `pr` tail policy **linear**. Every corrected value carries `within_range` / `extrapolated_low` / `extrapolated_high` / `source_nan`, and every run writes `qed_50_run_summary.csv` with per-model × SSP × catchment × variable status and extrapolation share; combos lacking a complete aggregate are reported as `skipped_ssp_agg_missing`, never silently omitted.
+
+**Why the fit window differs from the ranking window.** The 1981–2000 fit / 2001–2014 score discipline exists to stop a model being *scored* on data used to *fit its correction*. Projection application is not scoring — there is no observation in 2015–2100 to score against — so the projection EQM is fitted on all available historical data to minimise correction error. The deviation is dated (18 Nov 2026) in `QED_40` so it is reviewable rather than implicit.
+
+O4's decomposition (GCM × structure × tail policy) runs on the metric table these two notebooks produce; until that table exists the decomposition notebook is dormant by construction.
+
+## 5. Results
 
 **GR4J split-sample performance** (192 of 242 Tier-1/2 catchments; 50 skipped, logged):
 
@@ -105,19 +118,6 @@ Two mechanistic observations from the metric layer, reported as findings (not tu
 - On ephemeral catchments, CMIP-driven GR4J keeps baseflow running where the observed stream nearly dries up (simulated 10th-percentile flow ≈ 7× observed; simulated series never fall below the observed Q90 threshold → dry-spell bias −100%), while underestimating mean flow on the same catchments. Whole-flow KGE is nearly blind to this; the low-flow metrics are not — the empirical basis of the divergence.
 - Observed SPI-12→SRI-12 propagation lags (frozen, 167 catchments) concentrate at 0–1 months (median 1; 150/167), with the mean |SRI−SPI| diagnostic ≈ 0.4–0.7 — far from the ≈0.013 Machhar-type coupling-artefact signature, confirming the observed benchmark is fit for the H3 comparison.
 
-### 5.3 H3 verdict: drought-propagation reproduction (Phase 3)
-
-SPI-12→SRI-12 propagation was computed for all 22 models (corrected-forcing SPI-12; full-period GR4J-simulated SRI-12, 1982–2014) against the **frozen** observed lags, with the pre-registered reproduction band `|L_model − L_obs| ≤ 1 month` and the pre-registered three-clause falsification rule (`PROP_PRE_REGISTRATION.md`, dated before any model SRI was computed).
-
-**H3 STANDS** (verdict file: `data_processed/prop/h3_verdict.md`) — with a structure that matters for the selection story:
-
-- **Clauses 1–2 TRUE:** every model reproduces 0.91–0.96 of catchments and the inter-model spread is < 0.10 — reproduction of the observed 0–1-month propagation regime is nearly universal, and models differ only marginally on it.
-- **Clause 3 FALSE:** ρ(forcing rank, prop_share) = **−0.350** — mean-flow selection does not find propagation skill. The two *kinds* of skill (whole-flow forcing skill vs drought-propagation fidelity) are again nearly orthogonal, consistent with H1's near-zero wedge: a framework that selects on mean-flow skill alone cannot claim propagation competence.
-- **Artefact audit passed:** per-model mean |SRI−SPI| = 0.29–0.34, far from the ≈ 0.013 Machhar-type too-tight-coupling signature — propagation times were measured, not assumed by construction.
-- 109 model-combos excluded with reason codes (77 SRI gamma-fit failures, 32 SPI gamma-fit failures; per-model denominators 156–166, logged in `PROP_10_exclusions.csv`).
-
-**Implication carried forward to Objective 4:** because clause 3 fails, the drought-propagation criterion enters the selection test as a distinct dimension, not a corollary of forcing rank — models near-universal on the frozen band but unrankable by mean-flow skill is precisely the case the two-stage + propagation framework was built to separate.
-
 ### 5.2 H2 verdict: GR4J vs GR6J structural divergence (observed forcings, base case)
 
 GR6J was calibrated under the identical-treatment rule (192 catchments calibrated under both structures; median validation KGE 0.527 vs GR4J 0.543, paired Wilcoxon p = 0.45 — the structures are comparable at the whole-flow level, so the low-flow comparison is the informative one). Low-flow metrics were computed for both structures on observed forcings (172 paired catchments, evaluation window 2001–2014).
@@ -135,6 +135,19 @@ GR6J was calibrated under the identical-treatment rule (192 catchments calibrate
 | wet/intermediate | q95_bias | −12 / +13 pp | 32 / 31 |
 
 logNSE is **not** materially divergent anywhere — the structures differ in *where* and *how much* water they leave in the dry season, not in overall log-skill. GR6J's exponential store produces substantially lower 7-day minima (mam7) in the dry tercile (negative div = GR6J smaller), while overestimating low-flow volume (positive lf_volume div) in wet and intermediate terciles. **Per the pre-registered guardrail this is quantified divergence, not a superiority claim**: whether GR6J's drier dry-season behaviour is more faithful on any given catchment is an out-of-sample question the SSP-projection leg (14 GCMs × 4 SSPs) will carry forward, and per H2's falsification rule the structural axis cannot be dropped from Objective 4.
+
+### 5.3 H3 verdict: drought-propagation reproduction (Phase 3)
+
+SPI-12→SRI-12 propagation was computed for all 22 models (corrected-forcing SPI-12; full-period GR4J-simulated SRI-12, 1982–2014) against the **frozen** observed lags, with the pre-registered reproduction band `|L_model − L_obs| ≤ 1 month` and the pre-registered three-clause falsification rule (`PROP_PRE_REGISTRATION.md`, dated before any model SRI was computed).
+
+**H3 STANDS** (verdict file: `data_processed/prop/h3_verdict.md`) — with a structure that matters for the selection story:
+
+- **Clauses 1–2 TRUE:** every model reproduces 0.91–0.96 of catchments and the inter-model spread is < 0.10 — reproduction of the observed 0–1-month propagation regime is nearly universal, and models differ only marginally on it.
+- **Clause 3 FALSE:** ρ(forcing rank, prop_share) = **−0.350** — mean-flow selection does not find propagation skill. The two *kinds* of skill (whole-flow forcing skill vs drought-propagation fidelity) are again nearly orthogonal, consistent with H1's near-zero wedge: a framework that selects on mean-flow skill alone cannot claim propagation competence.
+- **Artefact audit passed:** per-model mean |SRI−SPI| = 0.29–0.34, far from the ≈ 0.013 Machhar-type too-tight-coupling signature — propagation times were measured, not assumed by construction.
+- 109 model-combos excluded with reason codes (77 SRI gamma-fit failures, 32 SPI gamma-fit failures; per-model denominators 156–166, logged in `PROP_10_exclusions.csv`).
+
+**Implication carried forward to Objective 4:** because clause 3 fails, the drought-propagation criterion enters the selection test as a distinct dimension, not a corollary of forcing rank — models near-universal on the frozen band but unrankable by mean-flow skill is precisely the case the two-stage + propagation framework was built to separate.
 
 ### 5.4 H5 verdict: the CAMELS-IND-Proj LSTM benchmark audited at low flows (Phase 5, executed 19 Nov 2026)
 
@@ -162,6 +175,12 @@ The LSTM is better on the **magnitude** low-flow metrics — total skill (logNSE
 The aridity split supports the pre-registered suspicion in its expected direction: the LSTM's logNSE advantage is smallest in the dry tercile (0.62 vs GR4J, 0.68 vs GR6J, against 0.98/0.98 and 0.93/0.95 in intermediate/wet), and on dry-spell duration in the dry tercile the LSTM wins only 25% of catchments. The dry-tercile cells are small (n = 7–53 per metric) and are reported as such, not averaged away.
 
 **Implications carried forward:** (i) H4's decomposition remains necessary — a benchmark that wins magnitudes but loses drought duration cannot arbitrate drought-projection uncertainty on its own; (ii) the SSP-phase comparison (our GR4J/GR6J projections vs the benchmark's 2015–2100 envelope, already cached as per-SSP window summaries in `bench_lstm_proj_lowflow.csv`) now has a like-for-like GCM basis; (iii) the framework's two-track discipline is vindicated rather than merely asserted — the benchmark was usable *because* it was treated as an audit object, not as substrate.
+
+### 5.5 Status of the projection leg (O4 substrate, in progress — no verdict yet)
+
+The SSP projection leg is the only unexecuted part of the framework, and it is gated on data acquisition, not on method. State as of 21 Nov 2026: **162 of 168** model × SSP × variable combos hold all 66 window years; the aggregation notebook is running on those, and the EQM application follows. **No H4 verdict exists yet**, and the pre-registered decision rule is unchanged (structure share ≥ 5% counts as non-negligible; a structure share below 5% everywhere is itself a reportable negative result).
+
+Two facts about this leg are recorded because they bear on the credibility of what will follow. First, the aggregation path was validated end-to-end on a single complete combo *before* production: layer counts and calendar dates correct (365/366, 2015-01-01…2015-12-31), precipitation in mm/day with an extreme of 145 mm/day against a historical maximum of 602 mm/day for the same model and catchments — the right order of magnitude, from the right units. Second, the first attempt at the notebook **silently wrote zero files while reporting success**: the combo index was keyed `var|model|ssp` but `split()` names its groups with `.`, so every combo looked absent to the loop. It was caught by comparing the expected combo count with the files written, and fixed; the completeness gate and the 168-row status table now make that class of failure visible rather than silent. A 6-worker parallel version was also tried and abandoned after `std::bad_alloc` inside `terra` on a 15.7 GB machine — recorded here so the sequential runtime (~2 min per combo) is understood as a measured choice, not an oversight.
 
 ## 6. Limitations
 

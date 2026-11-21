@@ -1,0 +1,6 @@
+2026-11-20 17:16:17 | NOTE: non-shortlist models present on disk and ignored: GISS-E2-1-G, INM-CM5-0 
+2026-11-20 17:16:21 | QED_40 done: 0 agg files on disk 
+2026-11-21 08:06:55 | ERROR EC-Earth3-Veg-LR ssp126 pr pr_day_EC-Earth3-Veg-LR_ssp126_r1i1p1f1_gr_2047_v2.0.nc std::bad_alloc 
+2026-11-21 08:06:56 | ERROR EC-Earth3-Veg-LR ssp126 pr pr_day_EC-Earth3-Veg-LR_ssp126_r1i1p1f1_gr_2048_v2.0.nc std::bad_alloc 
+2026-11-21 08:06:56 | ERROR EC-Earth3-Veg-LR ssp126 pr pr_day_EC-Earth3-Veg-LR_ssp126_r1i1p1f1_gr_2049_v2.0.nc std::bad_alloc 
+2026-11-21 08:07:18 | parallel aggregation failed: error writing to connection 

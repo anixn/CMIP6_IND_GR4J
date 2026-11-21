@@ -1,0 +1,7 @@
+module,catchment,reason_code,detail,n_missing_years
+QED_40,,combo_absent,pr|HadGEM3-GC31-MM|ssp245,66
+QED_40,,combo_absent,pr|HadGEM3-GC31-MM|ssp370,66
+QED_40,,combo_absent,tasmax|HadGEM3-GC31-MM|ssp245,66
+QED_40,,combo_absent,tasmax|HadGEM3-GC31-MM|ssp370,66
+QED_40,,combo_absent,tasmin|HadGEM3-GC31-MM|ssp245,66
+QED_40,,combo_absent,tasmin|HadGEM3-GC31-MM|ssp370,66
