@@ -23,8 +23,10 @@ data_processed/qed/qm_corrected/
 data_processed/hyd/model_inputs/
 
 # ---- SSP leg bulk outputs (regenerate with QED_50_ssp_apply.Rmd) ----
-data_processed/ssp/qm_params/
-data_processed/ssp/qm_corrected/
+# policy-scoped trees: qm_corrected_linear/ (reported), qm_corrected_constant/
+# (H4 tail-policy level only)
+data_processed/ssp/qm_params*/
+data_processed/ssp/qm_corrected*/
 
 # ---- SSP aggregation CSVs (~100 MB each, 168 combos; regenerate with ----
 # ---- QED_40_ssp_aggregate.Rmd from the raw nc archive)                ----

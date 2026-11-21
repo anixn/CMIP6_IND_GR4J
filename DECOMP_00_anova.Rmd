@@ -97,10 +97,16 @@ decomp_one <- function(dt) {
 
 decomp_run <- function(input, metrics, n_boot, seed) {
    stopifnot(all(c("catchment", "arid_tercile", "metric", "gcm",
-                   "structure", "tail_policy", "value") %in% names(input)))
+                   "structure", "tail_policy", "value",
+                   "ssp", "window") %in% names(input)))
    set.seed(seed)
+   # One ANOVA per catchment x metric x SSP x window. Pooling scenarios or
+   # windows into a single fit inflates the residual and makes shares
+   # incomparable across horizons (fixed 21 Nov 2026: the grouping previously
+   # stopped at catchment x metric, so 4 SSPs x 3 windows were treated as
+   # replicates of the same cell).
    shares <- input[!is.na(value), decomp_one(.SD),
-                   by = .(catchment, arid_tercile, metric)]
+                   by = .(catchment, arid_tercile, metric, ssp, window)]
    shares <- shares[!is.null(share_gcm)]   # drop NULL slices from failed fits
 
    # tercile-median shares with catchment-bootstrap CIs
@@ -111,7 +117,7 @@ decomp_run <- function(input, metrics, n_boot, seed) {
               .(share_gcm = stats::median(share_gcm),
                 share_structure = stats::median(share_structure),
                 share_tail = stats::median(share_tail)),
-              by = .(arid_tercile, metric)][, b := b]
+              by = .(arid_tercile, metric, ssp, window)][, b := b]
    }
    # (bootstrap done in the caller section so the deterministic first pass
    #  is separable and auditable)
@@ -168,18 +174,18 @@ for (b in seq_len(decomp_n_boot)) {
       .(share_gcm = stats::median(share_gcm),
         share_structure = stats::median(share_structure),
         share_tail = stats::median(share_tail)),
-      by = .(arid_tercile, metric)]
+      by = .(arid_tercile, metric, ssp, window)]
 }
 boot_all <- data.table::rbindlist(boot_rows, use.names = TRUE)
 ci <- boot_all[, .(lo = stats::quantile(share_structure, 0.025),
                    hi = stats::quantile(share_structure, 0.975)),
-               by = .(arid_tercile, metric)]
+               by = .(arid_tercile, metric, ssp, window)]
 
 med <- d[, .(median_share_gcm = round(stats::median(share_gcm), 3),
              median_share_structure = round(stats::median(share_structure), 3),
              median_share_tail = round(stats::median(share_tail), 3)),
-         by = .(arid_tercile, metric)]
-tab <- merge(med, ci, by = c("arid_tercile", "metric"))
+         by = .(arid_tercile, metric, ssp, window)]
+tab <- merge(med, ci, by = c("arid_tercile", "metric", "ssp", "window"))
 data.table::fwrite(tab, file.path(decomp_output_dir, "h4_summary.csv"))
 
 h4_stands <- any(tab$median_share_structure >= decomp_h4_structure_min)

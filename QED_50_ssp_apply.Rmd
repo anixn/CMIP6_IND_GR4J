@@ -37,28 +37,55 @@ source(file.path(tempdir(), "qed00_setup.R"))
 4. **No silent drops:** every skip is a summary row AND a log line; flags
    (`within_range`, `extrapolated_low/high`, `source_nan`) propagate to
    `method_flag` in every output CSV exactly as in the historical leg.
+5. **Tail policy is also a factor in H4, not only a setting.** The
+   decomposition (GCM x structure x tail policy) needs a second level, so the
+   policy can be overridden *for that experiment only*:
 
-Output layout (inside `data_processed/ssp/`):
+   ```
+   QED_SSP_TAIL=constant Rscript -e "rmarkdown::render('QED_50_ssp_apply.Rmd')"
+   ```
+
+   The default stays `linear`; every projection the paper reports comes from
+   the linear run. Outputs are policy-scoped (below) so the two levels cannot
+   overwrite each other, and the override never substitutes for the
+   pre-registered policy.
+
+Output layout (inside `data_processed/ssp/`, `<tag>` = `_linear` or `_constant`):
 
 ```
-qm_corrected/<model>/<ssp>/<tier>/<catchment_id>_<var>.csv   # date, source_value, corrected_value, method_flag
-qm_params/<model>/<tier>/<catchment_id>_<var>.rds            # fitted quantile pairs (per historical fit)
-qed_50_run_summary.csv                                       # one row per model x ssp x catchment x var
+qm_corrected<tag>/<model>/<ssp>/<tier>/<catchment_id>_<var>.csv   # date, source_value, corrected_value, method_flag
+qm_params<tag>/<model>/<tier>/<catchment_id>_<var>.rds            # fitted quantile pairs (per historical fit)
+qed_50_run_summary<tag>.csv                                       # one row per model x ssp x catchment x var
 ```
 
 ```{r log-file}
 qed_ssp_dir <- file.path(qed_project_root, "data_processed", "ssp")
-qed_ssp_log_file <- file.path(qed_ssp_dir, "qed_50_log.txt")
+# The tail policy is read here (not only in section 0) so the LOG FILE is
+# policy-scoped too: the linear and constant runs must not interleave.
+qed_extrap_pr <- Sys.getenv("QED_SSP_TAIL", "linear")
+stopifnot(qed_extrap_pr %in% c("linear", "constant"))
+qed_ssp_tag <- paste0("_", qed_extrap_pr)
+qed_ssp_log_file <- file.path(qed_ssp_dir, paste0("qed_50_log", qed_ssp_tag, ".txt"))
 stopifnot(dir.exists(qed_ssp_dir))   # QED_40 must have produced the SSP aggs
 ```
 
 ## 0. Tail-policy override (pre-registered, dated)
 
 ```{r tail-policy}
-# Pre-registered in QED_40_ssp_aggregate.Rmd (18 Nov 2026): SSP pr tail = linear
-qed_extrap_pr <- "linear"
+# Pre-registered in QED_40_ssp_aggregate.Rmd (18 Nov 2026): SSP pr tail = linear.
+# qed_extrap_pr / qed_ssp_tag are read in the log-file chunk above so the log
+# file is policy-scoped; the environment override exists ONLY to build the
+# second level of H4's tail-policy factor (note 5 above) and is never used for
+# a reported projection.
 cat("pr tail policy for the SSP leg:", qed_extrap_pr,
     "(historical leg used 'constant' -- deliberate, dated override)\n")
+
+# Policy-scoped output names: the linear and constant runs cannot collide.
+qed_ssp_corr_dir   <- file.path(qed_ssp_dir, paste0("qm_corrected", qed_ssp_tag))
+qed_ssp_par_root   <- file.path(qed_ssp_dir, paste0("qm_params",    qed_ssp_tag))
+qed_ssp_summary_fp <- file.path(qed_ssp_dir,
+                                paste0("qed_50_run_summary", qed_ssp_tag, ".csv"))
+cat("output tree:", qed_ssp_corr_dir, "\n")
 ```
 
 ## 1. Inputs: roster + historical aggs + SSP aggs
@@ -130,8 +157,8 @@ for (i in seq_len(nrow(qm_catch))) {
 ## 3. Fit on the historical pair (once per model x catchment x var), then apply to every SSP
 
 ```{r main-loop, eval=TRUE}
-dir.create(file.path(qed_ssp_dir, "qm_corrected"), showWarnings = FALSE)
-dir.create(file.path(qed_ssp_dir, "qm_params"),    showWarnings = FALSE)
+dir.create(qed_ssp_corr_dir, showWarnings = FALSE)
+dir.create(qed_ssp_par_root, showWarnings = FALSE)
 
 summary_rows <- list(); n_row <- 0L
 
@@ -148,7 +175,7 @@ for (model in models_ssp) {
    for (i in seq_len(nrow(qm_catch))) {
       id  <- qm_catch$id[i]
       tier <- qm_catch$tier[i]
-      par_dir <- file.path(qed_ssp_dir, "qm_params", model, tier)
+      par_dir <- file.path(qed_ssp_par_root, model, tier)
       dir.create(par_dir, recursive = TRUE, showWarnings = FALSE)
       ref <- forcing_cache[[id]]
       fc <- list()
@@ -199,7 +226,7 @@ for (model in models_ssp) {
 
       for (i in seq_len(nrow(qm_catch))) {
          id <- qm_catch$id[i]; tier <- qm_catch$tier[i]
-         out_dir <- file.path(qed_ssp_dir, "qm_corrected", model, s, tier)
+         out_dir <- file.path(qed_ssp_corr_dir, model, s, tier)
          dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
 
          res <- tryCatch({
@@ -289,15 +316,14 @@ for (model in models_ssp) {
 }
 
 qed50_summary <- data.table::rbindlist(summary_rows, fill = TRUE)
-data.table::fwrite(qed50_summary,
-                   file.path(qed_ssp_dir, "qed_50_run_summary.csv"))
+data.table::fwrite(qed50_summary, qed_ssp_summary_fp)
 print(table(qed50_summary$status))
 ```
 
 ## 4. Verification
 
 ```{r verify}
-made <- list.files(file.path(qed_ssp_dir, "qm_corrected"),
+made <- list.files(qed_ssp_corr_dir,
                    pattern = "_pr\\.csv$", recursive = TRUE, full.names = TRUE)
 cat("catchment pr series written:", length(made), "\n")
 stopifnot(length(made) > 0)   # never wipe outputs on a config mistake
@@ -308,12 +334,15 @@ print(one[, .N, by = method_flag])
 cat("gap rule: 'source_nan' includes Feb-29 of noleap models AND the\n",
     "2061-2080 window gap -- downstream counts these in n_gap_filled,\n",
     "never fills silently.\n")
-qed_log("QED_50 done", qed_ssp_log_file)
+qed_log(paste("QED_50 done:", qed_extrap_pr, "tail,", length(made),
+              "pr series"), qed_ssp_log_file)
 ```
 
 **Handoff contract for downstream SSP modules:** corrected SSP series live at
-`data_processed/ssp/qm_corrected/<model>/<ssp>/<tier>/<id>_<var>.csv` with
-the same columns as the historical `qm_corrected/` tree, so the HYD-style
-readers work unchanged. NAs mean: window gap (2061--2080), Feb-29 of noleap
-models, or 360-day-calendar invalid dates -- always count, never fill.
-`extrapolation_share` for SSP rows must be computed on the SSP window days.
+`data_processed/ssp/qm_corrected_<tail>/<model>/<ssp>/<tier>/<id>_<var>.csv`
+(`<tail>` = `linear` for every reported projection, `constant` only for the H4
+tail-policy level) with the same columns as the historical `qm_corrected/`
+tree, so the HYD-style readers work unchanged. NAs mean: window gap
+(2061--2080), Feb-29 of noleap models, or 360-day-calendar invalid dates --
+always count, never fill. `extrapolation_share` for SSP rows must be computed
+on the SSP window days.
