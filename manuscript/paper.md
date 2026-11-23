@@ -83,7 +83,7 @@ Scenario-driven water-availability and drought studies over Indian catchments de
 
 ## 4. Methods
 
-![**Figure 1.** The two-stage, low-flow-aware selection framework. Stage 1 selects GCMs on out-of-sample forcing skill; stage 2 drives the calibrated GR4J and GR6J structures with the corrected SSP forcings and evaluates low-flow metrics; the five hypotheses are tested as decision gates (H1–H3, H5 on the historical/discharge level, H4 on the projection layer). Aridity terciles stratify every claim.](figures/fig1_framework.png){width=100%}
+![**Figure 1.** The two-stage, low-flow-aware selection framework. Stage 1 selects GCMs on out-of-sample forcing skill; stage 2 drives the calibrated GR4J and GR6J structures with the corrected SSP forcings and evaluates low-flow metrics; the five hypotheses are tested as decision gates (H1–H3, H5 on the historical/discharge level, H4 on the projection layer). Aridity terciles stratify every claim.](figures/fig1_framework.png){height=85%}
 
 ### 4.1 Historical leg (complete)
 1. **Tiering** by forcing availability (1981–2014): Tier 1 ≥70% (180), Tier 2 ≥30% (62), Tier 3 excluded (230) — all logged.
@@ -234,7 +234,7 @@ The aridity split supports the pre-registered suspicion in its expected directio
 
 ### 5.5 H4 verdict: GCM × structure × tail-policy decomposition of projected low-flow variance (Phase 4, executed 23 Nov 2026)
 
-![**Figure 6.** H4: mean variance shares of the seven-term exact partition (GCM, structure, tail policy, three two-way interactions, 3-way), per low-flow indicator and aridity tercile, averaged over 192 catchments, four SSPs and three windows. Structure owns 34-68% of low-flow variance and exceeds GCM choice in dry catchments; mean flow is GCM-dominated (about 95%); the bias-correction tail policy contributes at most 0.5%.](figures/fig6_h4_variance_decomposition.png){width=100%}
+![**Figure 6.** H4: mean variance shares of the seven-term exact partition (GCM, structure, tail policy, three two-way interactions, 3-way), per low-flow indicator and aridity tercile, averaged over 192 catchments, four SSPs and three windows. Structure owns 34-68% of low-flow variance and exceeds GCM choice in dry catchments; mean flow is GCM-dominated (about 95%); the bias-correction tail policy contributes at most 0.5%.](figures/fig6_h4_variance_decomposition.png){height=92%}
 
 The decomposition runs on the projection layer assembled 23 Nov 2026 (`DECOMP_10`, `metric_version v1_proj`): **192** catchments calibrated under both structures (64/64/64 aridity terciles), driven with each corrected SSP forcing under the calibrated GR4J **and** GR6J parameters, five always-defined low-flow indicators, three future windows (2021–2040, 2041–2060, 2082–2100; the 2061–2080 archive gap excluded, never interpolated), **14/13/13/14** GCMs (HadGEM3-GC31-MM unpublished for ssp245/ssp370 — logged, never padded). **11,520** ANOVA cells (192 × 5 metrics × 4 SSPs × 3 windows); 11,514 decomposed, 6 dropped (one catchment's `lf_ratio_q95` is zero-variance in six cells — logged in `h4_dropped_cells.csv`). Per the design note in §4.2, the per-cell factorial is **saturated** (residual df = 0): every number below is an exact variance partition, and the inference is the pre-registered rule plus a 1,000-resample catchment bootstrap (seed 20261118), not per-cell significance tests.
 

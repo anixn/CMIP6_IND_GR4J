@@ -38,7 +38,7 @@ p3 <- ggplot(h1, aes(forcing_rank, lowflow_rank)) +
        y = "Low-flow-skill rank (composite, 78 catchments)",
        title = "Forcing skill and low-flow skill are essentially orthogonal") +
   theme_academic()
-save_fig_academic(p3, fig, "fig3_h1_rank_divergence", width = 7.2, height = 4.0)
+save_fig_academic(p3, fig, "fig3_h1_rank_divergence", width = 6.4, height = 3.9)
 
 # ---------------------------------------------------------------------------
 # Fig 4 -- H2: GR4J vs GR6J divergence by aridity tercile
@@ -78,7 +78,7 @@ p4 <- ggplot(div, aes(x = arid_tercile, y = divergence)) +
                        "material (median -0.01 to 0.05, p = 0.41-0.45) and is omitted")) +
   theme_academic() +
   theme(panel.grid.major.y = element_blank())
-save_fig_academic(p4, fig, "fig4_h2_structural_divergence", width = 7.2, height = 5.4)
+save_fig_academic(p4, fig, "fig4_h2_structural_divergence", width = 6.4, height = 5.4)
 
 # ---------------------------------------------------------------------------
 # Fig 5 -- H3: observed propagation lags + per-model reproduction
@@ -105,7 +105,7 @@ pb <- ggplot(ps, aes(prop_share, reorder(model, prop_share))) +
   theme(panel.grid.major.y = element_blank())
 
 p5 <- pa / pb + plot_layout(heights = c(1, 2.2))
-save_fig_academic(p5, fig, "fig5_h3_propagation", width = 6.8, height = 7.0)
+save_fig_academic(p5, fig, "fig5_h3_propagation", width = 6.2, height = 6.9)
 
 # ---------------------------------------------------------------------------
 # Fig 6 -- H4: seven-term variance decomposition (centrepiece)
@@ -149,7 +149,7 @@ p6 <- ggplot(agg, aes(share, arid_tercile, fill = term)) +
   theme_academic() +
   theme(panel.grid.major.y = element_blank(),
         strip.text.y.right = element_text(angle = 0, hjust = 0))
-save_fig_academic(p6, fig, "fig6_h4_variance_decomposition", width = 7.2, height = 7.0)
+save_fig_academic(p6, fig, "fig6_h4_variance_decomposition", width = 6.4, height = 7.0)
 
 # ---------------------------------------------------------------------------
 # Fig 7 -- H5: LSTM win rates, magnitude vs duration
@@ -174,6 +174,6 @@ p7 <- ggplot(h5, aes(metric, lstm_win_share, fill = compared_with)) +
        title = "The LSTM wins magnitudes but loses drought duration",
        caption = "dashed line: equal skill (0.5)") +
   theme_academic()
-save_fig_academic(p7, fig, "fig7_h5_lstm_win_rates", width = 7.0, height = 4.2)
+save_fig_academic(p7, fig, "fig7_h5_lstm_win_rates", width = 6.4, height = 4.1)
 
 cat("done\n")

@@ -1,30 +1,22 @@
 flowchart LR
-    subgraph DATA["Data acquisition and correction"]
-        A["Raw CMIP6 SSP archive<br/>10,692 netCDF files<br/>14 GCMs × 4 SSPs × 3 variables<br/>no 2061–2080 files"] --> B["QED_40 aggregation<br/>162 / 168 combos complete<br/>6 HadGEM3 ssp245/370 unpublished"]
-        B --> C["QED_50 EQM apply<br/>39,204 files per tail policy<br/>linear and constant"]
+    subgraph DATA["Acquisition and correction"]
+        A["Raw SSP archive<br/>10,692 netCDF files<br/>no 2061-2080"] --> B["QED_40 aggregation<br/>162 / 168 combos<br/>6 unpublished"]
+        B --> C["QED_50 EQM apply<br/>39,204 files per policy"]
     end
-
-    subgraph SIM["Projection simulation"]
-        C --> D["DECOMP_10<br/>GR4J + GR6J on calibrated parameters<br/>3 windows · 5 indicators<br/>124,416 simulations"]
-        D --> E["input_metrics.csv<br/>622,080 rows<br/>metric_version v1_proj"]
+    subgraph SIM["Simulation"]
+        C --> D["DECOMP_10<br/>GR4J + GR6J<br/>124,416 simulations"]
+        D --> E["622,080 metric rows"]
     end
-
-    subgraph STAT["Saturated factorial"]
-        E --> F["DECOMP_00<br/>7-term exact partition<br/>11,514 / 11,520 cells"]
-        F --> G["h4_verdict.md<br/>H4 STANDS"]
+    subgraph STAT["Partition"]
+        E --> F["DECOMP_00<br/>11,514 / 11,520 cells"]
+        F --> G["H4 STANDS"]
     end
-
-    subgraph ROSTER["Roster (stated, never padded)"]
-        R1["472 CAMELS-IND setting"]
-        R2["242 Tier-1 + Tier-2"]
-        R3["192 both structures<br/>64 / 64 / 64 aridity"]
-        R4["172 H2 base case"]
-        R5["78 H1 composite<br/>167 propagation lags"]
-        R1 --> R2 --> R3
-        R3 --> R4
-        R3 --> R5
+    subgraph ROSTER["Roster"]
+        R1["472 setting"] --> R2["242 Tier-1/2"]
+        R2 --> R3["192 both structures"]
+        R3 --> R4["172 H2 base"]
+        R3 --> R5["78 H1 composite"]
     end
-
     classDef data fill:#e8f1fa,stroke:#1f4e79,color:#0d2b45
     classDef sim fill:#eaf5ea,stroke:#2e6b2e,color:#123d12
     classDef stat fill:#fdf1e0,stroke:#a6611a,color:#4a2c07
