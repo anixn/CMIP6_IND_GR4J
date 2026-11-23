@@ -1,5 +1,10 @@
-% references.bib -- minimal verified core; full literature survey pending.
-% Entries marked TODO need verification before submission.
+% references.bib -- bibliography for paper.md (draft v0.6).
+% Kept SEPARATE from the manuscript on purpose: pandoc --citeproc builds the
+% PDF reference list from this file; the markdown keeps inline author-year
+% mentions. Entries marked VERIFY need checking at camera-ready (see paper.md
+% section 8 verification list and manuscript/NOVELTY_AND_ANOVA_SPEC.md).
+
+% ---------------- GR models / PET / KGE / CMIP6 ----------------
 
 @article{perrin2003gr4j,
   author  = {Perrin, Charles and Michel, Claude and Andr{\'e}assian, Vazken},
@@ -9,15 +14,6 @@
   pages   = {275--289},
   year    = {2003},
   doi     = {10.1016/S0022-1694(03)00225-7}
-}
-
-@article{coron2017airgr,
-  author  = {Coron, Laurent and Thirel, Guillaume and Delaigue, Olivier and Perrin, Charles and Andr{\'e}assian, Vazken},
-  title   = {airGR: Suite of GR hydrological models and procedures for their calibration and evaluation}, % TODO verify exact title
-  journal = {Journal of Hydrologic Engineering}, % TODO verify
-  volume  = {22},
-  year    = {2017},
-  doi     = {10.1061/(ASCE)HE.1943-5584.0001539}
 }
 
 @article{oudin2005pet,
@@ -30,19 +26,18 @@
   doi     = {10.1016/j.jhydrol.2004.08.026}
 }
 
-@article{eyring2016cmip6,
-  author  = {Eyring, Veronika and Bony, Sandrine and Meehl, Gerald A. and Senior, Catherine A. and Stevens, Bjorn and Stouffer, Ronald J. and Taylor, Karl E.},
-  title   = {Overview of the Coupled Model Intercomparison Project Phase 6 (CMIP6) experimental design and organization},
-  journal = {Geoscientific Model Development},
-  volume  = {9},
-  pages   = {1937--1958},
-  year    = {2016},
-  doi     = {10.5194/gmd-9-1937-2016}
+@article{coron2017airgr,
+  author  = {Coron, Laurent and Thirel, Guillaume and Delaigue, Olivier and Perrin, Charles and Andr{\'e}assian, Vazken},
+  title   = {airGR: Suite of GR hydrological models and procedures for their calibration and evaluation}, % VERIFY exact title
+  journal = {Journal of Hydrologic Engineering}, % VERIFY
+  volume  = {22},
+  year    = {2017},
+  doi     = {10.1061/(ASCE)HE.1943-5584.0001539}
 }
 
 @article{gupta2009kge,
   author  = {Gupta, Hoshin V. and Kling, Harald and Yilmaz, Kasim K. and Martinez, Guillermo F.},
-  title   = {Decomposition of the mean squared error and NSE performance criteria: Implications for improving hydrological modelling},
+  title   = {Decomposition of the mean squared error and {NSE} performance criteria: Implications for improving hydrological modelling},
   journal = {Journal of Hydrology},
   volume  = {377},
   pages   = {80--91},
@@ -59,7 +54,147 @@
   year    = {1985}
 }
 
-% TODO (survey pending): CAMELS-IND dataset paper; EQM extrapolation
-% behaviour on unpaired (free-running) series; CMIP6 regional evaluation
-% over South Asia; KGE interpretability (Knoben et al. 2019); ECS values
-% for shortlisted models; large-ensemble design (SMILEs).
+@article{eyring2016cmip6,
+  author  = {Eyring, Veronika and Bony, Sandrine and Meehl, Gerald A. and Senior, Catherine A. and Stevens, Bjorn and Stouffer, Ronald J. and Taylor, Karl E.},
+  title   = {Overview of the Coupled Model Intercomparison Project Phase 6 ({CMIP6}) experimental design and organization},
+  journal = {Geoscientific Model Development},
+  volume  = {9},
+  pages   = {1937--1958},
+  year    = {2016},
+  doi     = {10.5194/gmd-9-1937-2016}
+}
+
+% ---------------- Indian datasets / monitoring / projections ----------------
+
+@article{mangukiya2025camelsind,
+  author  = {Mangukiya, Nishant Kumar and Sharma, Anurag and Wany, Ankita and Sarangi, Kartik and Jain, Pallavi and Tiwari, Aadhar and others}, % VERIFY complete author list
+  title   = {{CAMELS-IND}: hydrometeorological time series and catchment attributes for 472 catchments in Peninsular India},
+  journal = {Earth System Science Data},
+  volume  = {17},
+  pages   = {461--491},
+  year    = {2025},
+  doi     = {10.5194/essd-17-461-2025}
+}
+
+@article{chuphal2024droughtatlas,
+  author  = {Chuphal, Dharm Singh and Kushwaha, Apurv Prakash and Aadhar, Saran and Mishra, Vimal},
+  title   = {Drought Atlas of {India}, 1901--2020},
+  journal = {Scientific Data},
+  volume  = {11},
+  pages   = {7},
+  year    = {2024},
+  doi     = {10.1038/s41597-023-02862-0}
+}
+
+@article{mishra2020biascorrected,
+  author  = {Mishra, Vimal and Bhatia, Udit and Tiwari, Aadhar},
+  title   = {Bias-corrected climate projections for {South Asia} from {CMIP6}},
+  journal = {Scientific Data},
+  volume  = {7},
+  pages   = {1--13}, % VERIFY article number
+  year    = {2020},
+  doi     = {10.1038/s41597-020-00681-1}
+}
+
+@misc{singh2026camelsindproj,
+  author  = {Singh, A. and Mangukiya, N. K. and Sahu, G. and Sharma, A.}, % VERIFY complete author list
+  title   = {{CAMELS-IND-Proj}: daily streamflow projections for 472 {Peninsular Indian} catchments under future climate scenarios},
+  year    = {2026},
+  doi     = {10.5281/zenodo.21775597},
+  publisher = {Zenodo},
+  note    = {CC BY 4.0}
+}
+
+@article{mangukiya2026wrr,
+  author  = {Mangukiya, Nishant Kumar and others}, % VERIFY complete author list
+  title   = {Benchmarking and selecting optimal hydrological models for catchment-scale streamflow simulation in {Peninsular India}},
+  journal = {Water Resources Research},
+  volume  = {62},
+  year    = {2026},
+  note    = {2026WR044753}
+}
+
+@article{sharma2026hp,
+  author  = {Sharma, V. and Barbhuiya, S. and Gupta, V.}, % VERIFY complete author list / initials
+  title   = {Projections of future streamflow for {India} informed by {CMIP6} global climate models},
+  journal = {Hydrological Processes},
+  volume  = {40},
+  number  = {3},
+  pages   = {e70476},
+  year    = {2026}
+}
+
+@article{wilby2006thames,
+  author  = {Wilby, Robert L. and Harris, Ian},
+  title   = {A framework for assessing uncertainties in climate change impacts: low-flow scenarios for the {River Thames}, {UK}},
+  journal = {Water Resources Research},
+  volume  = {42},
+  pages   = {W02419},
+  year    = {2006},
+  doi     = {10.1029/2005WR004065}
+}
+
+% ---------------- ANOVA / decomposition prior art (conceded machinery) -------
+
+@article{park2025jhrs,
+  author  = {Park, J. and Kim, J. H. and Sung, J. H. and Chung, E. S.},
+  title   = {Quantifying uncertainty contributions of hydrologic modeling process to hydrologic drought projection in {South Korea}},
+  journal = {Journal of Hydrology: Regional Studies},
+  volume  = {62},
+  pages   = {102991},
+  year    = {2025},
+  doi     = {10.1016/j.ejrh.2025.102991}
+}
+
+@article{kimchung2026hess,
+  author  = {Kim, J. H. and Chung, E.-S.},
+  title   = {Insights into uncertainties in future drought analysis using hydrological simulation model},
+  journal = {Hydrology and Earth System Sciences},
+  volume  = {30},
+  pages   = {227--247},
+  year    = {2026},
+  doi     = {10.5194/hess-30-227-2026}
+}
+
+@article{senatore2022med,
+  author  = {Senatore, A. and others}, % VERIFY full citation at camera-ready
+  title   = {Uncertainty contributions to hydrological drought projection under climate change in the {Mediterranean}}, % VERIFY exact title
+  journal = {VERIFY},
+  year    = {2022},
+  note    = {Full citation to be verified at camera-ready; cited for the ANOVA-with-bias-correction-factor precedent only}
+}
+
+% ---------------- Bias-correction tail behaviour (tail_policy anchors) -------
+
+@article{cannon2015qm,
+  author  = {Cannon, Alex J. and Sobie, Stephen R. and Murdock, Trevor Q.},
+  title   = {Bias correction of {GCM} precipitation by quantile mapping: How well do methods preserve changes in quantiles and extremes?},
+  journal = {Journal of Climate},
+  volume  = {28},
+  number  = {17},
+  pages   = {6938--6959},
+  year    = {2015},
+  doi     = {10.1175/JCLI-D-14-00754.1}
+}
+
+@article{themessl2012ecc,
+  author  = {Theme{\ss}l, Matthias Jakob and Gobiet, Andreas and Heinrich, Georg},
+  title   = {Empirical-statistical downscaling and error correction of regional climate models and its impact on the climate change signal},
+  journal = {Climatic Change},
+  volume  = {112},
+  number  = {2},
+  pages   = {449--468},
+  year    = {2012},
+  doi     = {10.1007/s10584-011-0224-4}
+}
+
+@article{liu2025atmosphere,
+  author  = {Liu, T. and others}, % VERIFY complete author list at camera-ready
+  title   = {Future streamflow and hydrological drought under {CMIP6} climate projections},
+  journal = {Atmosphere},
+  volume  = {16},
+  number  = {6},
+  pages   = {691},
+  year    = {2025},
+  doi     = {10.3390/atmos16060691}
+}

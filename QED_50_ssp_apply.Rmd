@@ -34,6 +34,20 @@ source(file.path(tempdir(), "qed00_setup.R"))
    `qed_extrap_pr <- "constant"` from QED_00 **for this notebook only** --
    every extrapolated value is still flagged, so downstream users can
    filter or downweight them.
+
+   **Dated fix (2026-11-23, v2).** The `linear` branch of QED_00's
+   `qed_apply_eqm()` extends *both* tails with the slope of the lowest CDF
+   interval; for `pr` that interval is a drizzle artefact and the derived
+   slope (~1e8) blew the high tail up to **4.0e9 mm/day** (CanESM5 / ssp245 /
+   03008). Section 0b installs a per-tail applier for `pr` only. Its first
+   version (per-tail slope from the outermost CDF segment) still peaked at
+   8,588 mm/d because that segment is itself numerically degenerate; the
+   final version uses a **robust OLS slope over the top 5 CDF points** and a
+   **physical ceiling of 1,000 mm/d on extrapolated pr**, with the capped-day
+   count logged. Temperature is left exactly as in the historical leg. After
+   the fix the same CanESM5 series has max 151.9 mm/d for its own extremes;
+   the ceiling binds only on the most extreme source storms. The verification
+   chunk fails the run if any corrected `pr` exceeds 1000 mm/d.
 4. **No silent drops:** every skip is a summary row AND a log line; flags
    (`within_range`, `extrapolated_low/high`, `source_nan`) propagate to
    `method_flag` in every output CSV exactly as in the historical leg.
@@ -88,6 +102,112 @@ qed_ssp_summary_fp <- file.path(qed_ssp_dir,
 cat("output tree:", qed_ssp_corr_dir, "\n")
 ```
 
+### 0b. Corrected linear high-tail slope for `pr` (dated fix, 2026-11-23)
+
+```{r tail-fix}
+# WHY THIS EXISTS. QED_00's qed_apply_eqm() extends BOTH tails with the slope
+# of the LOWEST CDF interval:
+#      slope <- (q_ref[2] - q_ref[1]) / (q_src[2] - q_src[1])
+# For precipitation that interval is a drizzle artefact: for CanESM5 / 03008 /
+# DJF, q_src = (0, 1.9e-10) mm/d against q_ref = (0, 0.05) mm/d, i.e. a slope
+# of 2.6e8 where the true high-tail slope is 2.11. Applying it above the
+# training maximum turned a 60.13 mm/d future storm into 4.0e9 mm/d
+# (measured in qm_corrected_linear/CanESM5/ssp245/tier1/03008_pr.csv).
+#
+# The FIRST-ORDER INTENT of the pre-registered "linear" policy (QED_40,
+# 18 Nov 2026) is per-tail linear extension; the single-slope code did not
+# implement it. This applier is qed_apply_eqm() with the high tail using
+# (a) a ROBUST slope and (b) a physical ceiling for pr:
+#
+#   (a) the outermost CDF segment alone is numerically degenerate: its two
+#       top quantiles can be nearly identical in source space, so even the
+#       per-tail slope explodes (measured after the first fix attempt: max
+#       corrected pr still 8,588 mm/d). The high-tail slope is therefore an
+#       OLS fit over the top 5 CDF points (cov/var form, no lm overhead).
+#       Slope census over all 5,324 pr fits: median 2.67, p95 7.4, p99 14.4
+#       -- the slope itself is legitimately large because GCM drizzle maps
+#       onto intense observed storms.
+#   (b) with source storms up to 8-15x the training maximum, ANY linear
+#       extension yields unphysical values (implied corrected pr at a
+#       600 mm/d source storm: median 1,580, p95 4,370). Extrapolated pr is
+#       therefore capped at QED_SSP_PR_CEILING = 1000 mm/d -- about 8x the
+#       observed reference maximum and below the world-record 24-h rainfall
+#       (1,825 mm, Foc-Foc 1966). The cap binds only far beyond the mapped
+#       range (the pre-registered intent "constant clamping would truncate
+#       intensified future rainfall extremes" is preserved inside it) and
+#       every capped day is counted and logged.
+#
+# It is used for pr ONLY: temperature keeps the exact historical-leg
+# implementation, so the historical and SSP corrections remain identical for
+# that variable (its low-interval slope is O(1), so the amplification there
+# is modest and pre-existing).
+qed_ssp_pr_ceiling <- 1000   # mm/d, physical ceiling on extrapolated pr
+
+qed_ssp_apply_eqm <- function(x, fit, extrap = "constant", per_tail = FALSE,
+                              ceiling = Inf) {
+   out <- data.table::data.table(
+      x_src = x, x_corrected = NA_real_,
+      within_range = NA, extrapolated_low = FALSE, extrapolated_high = FALSE)
+   if (is.null(fit)) return(out)
+
+   na_i <- is.na(x)
+   n    <- length(fit$q_src)
+   lo   <- fit$q_src[1]
+   hi   <- fit$q_src[n]
+
+   p_x <- stats::approx(fit$q_src, fit$p, xout = x, method = "linear",
+                        yleft = 0, yright = 1, rule = 2, ties = "ordered")$y
+   y   <- stats::approx(fit$p, fit$q_ref, xout = p_x, method = "linear",
+                        rule = 2, ties = "ordered")$y
+
+   low_i  <- !na_i & x < lo
+   high_i <- !na_i & x > hi
+
+   if (extrap == "linear" && any(low_i | high_i)) {
+      dsx_lo <- fit$q_src[2] - fit$q_src[1]
+      dry_lo <- fit$q_ref[2] - fit$q_ref[1]
+      slope_lo <- if (is.finite(dsx_lo) && dsx_lo > 0) dry_lo / dsx_lo else 1
+      if (isTRUE(per_tail)) {
+         k   <- min(5L, n)
+         pts <- seq.int(n - k + 1L, n)
+         sx  <- fit$q_src[pts]
+         sy  <- fit$q_ref[pts]
+         slope_hi <- if (length(sx) > 1 && diff(range(sx)) > 1e-9)
+                        stats::cov(sx, sy) / stats::var(sx) else NA_real_
+         if (!is.finite(slope_hi) || slope_hi <= 0) slope_hi <- NA_real_
+      } else {
+         dsx_hi <- fit$q_src[n] - fit$q_src[n - 1]
+         dry_hi <- fit$q_ref[n] - fit$q_ref[n - 1]
+         slope_hi <- if (is.finite(dsx_hi) && dsx_hi > 0) dry_hi / dsx_hi else 1
+      }
+      y[low_i]  <- fit$q_ref[1] + (x[low_i]  - lo) * slope_lo
+      if (is.finite(slope_hi)) {
+         y[high_i] <- fit$q_ref[n] + (x[high_i] - hi) * slope_hi
+         y[high_i] <- pmin(y[high_i], ceiling)
+      } else {
+         y[high_i] <- fit$q_ref[n]          # degenerate segment -> clamp
+      }
+   } else {
+      y[low_i]  <- fit$q_ref[1]
+      y[high_i] <- fit$q_ref[n]
+   }
+
+   out$x_corrected      <- y
+   out$within_range     <- !na_i & !low_i & !high_i
+   out$extrapolated_low  <- low_i
+   out$extrapolated_high <- high_i
+   out
+}
+
+qed_ssp_pr_per_tail <- TRUE   # pr high tail uses its own robust slope (see above)
+qed50_pr_capped <- 0L         # counts corrected pr days at the physical ceiling
+qed_log(paste("tail fix v2:", if (qed_ssp_pr_per_tail) "pr high tail uses the" else
+              "pr high tail reuses the",
+              "high-interval slope; robust OLS over the top 5 CDF points;",
+              "extrapolated pr capped at", qed_ssp_pr_ceiling, "mm/d"),
+        qed_ssp_log_file)
+```
+
 ## 1. Inputs: roster + historical aggs + SSP aggs
 
 ```{r load-inventory}
@@ -131,9 +251,9 @@ cat("Models to correct:", length(models_ssp), "\n")
 ```
 
 ```{r test-mode-override}
-# explicit, visible test mode (mirror of QED_20's): set TRUE for a small
-# run; production leaves it FALSE
-qed50_test_mode <- FALSE
+# explicit, visible test mode (mirror of QED_20's): set QED_50_TEST=1 for a
+# small run; production leaves it unset/0
+qed50_test_mode <- identical(Sys.getenv("QED_50_TEST", "0"), "1")
 if (qed50_test_mode) {
    models_ssp <- models_ssp[1]
    meta <- meta[model == models_ssp & ssp == ssps_all[1]]
@@ -161,13 +281,16 @@ dir.create(qed_ssp_corr_dir, showWarnings = FALSE)
 dir.create(qed_ssp_par_root, showWarnings = FALSE)
 
 summary_rows <- list(); n_row <- 0L
+qed50_pr_max  <- 0          # tracks the largest corrected pr written (tail-fix check)
+qed50_pr_gt500 <- 0L        # days above a physical daily ceiling (1000 mm/d is
+                            # the world record; 500 mm/d is already extreme)
 
-for (model in models_ssp) {
+for (m in models_ssp) {
 
    # ---- historical aggs (fit sources) + observed reference -------------------
-   agg_pr  <- qed_read_agg(file.path(qed_agg_dir, paste0("agg_pr_",    model, ".csv")))
-   agg_tx  <- qed_read_agg(file.path(qed_agg_dir, paste0("agg_tasmax_", model, ".csv")))
-   agg_tn  <- qed_read_agg(file.path(qed_agg_dir, paste0("agg_tasmin_", model, ".csv")))
+   agg_pr  <- qed_read_agg(file.path(qed_agg_dir, paste0("agg_pr_",    m, ".csv")))
+   agg_tx  <- qed_read_agg(file.path(qed_agg_dir, paste0("agg_tasmax_", m, ".csv")))
+   agg_tn  <- qed_read_agg(file.path(qed_agg_dir, paste0("agg_tasmin_", m, ".csv")))
    hist_agg <- list(pr = agg_pr, tasmax = agg_tx, tasmin = agg_tn)
 
    # ---- fits: one per catchment x var, reused across all SSPs ----------------
@@ -175,7 +298,7 @@ for (model in models_ssp) {
    for (i in seq_len(nrow(qm_catch))) {
       id  <- qm_catch$id[i]
       tier <- qm_catch$tier[i]
-      par_dir <- file.path(qed_ssp_par_root, model, tier)
+      par_dir <- file.path(qed_ssp_par_root, m, tier)
       dir.create(par_dir, recursive = TRUE, showWarnings = FALSE)
       ref <- forcing_cache[[id]]
       fc <- list()
@@ -214,9 +337,9 @@ for (model in models_ssp) {
    }
 
    # ---- apply to each SSP series --------------------------------------------
-   ssps_here <- sort(unique(meta[model == model, ssp]))
+   ssps_here <- sort(unique(meta[model == m, ssp]))
    for (s in ssps_here) {
-      ssp_files <- meta[model == model & ssp == s]
+      ssp_files <- meta[model == m & ssp == s]
       ssp_agg <- setNames(vector("list", 3), qed_vars)
       for (v in qed_vars) {
          fp <- ssp_files[var == v, file]
@@ -226,7 +349,7 @@ for (model in models_ssp) {
 
       for (i in seq_len(nrow(qm_catch))) {
          id <- qm_catch$id[i]; tier <- qm_catch$tier[i]
-         out_dir <- file.path(qed_ssp_corr_dir, model, s, tier)
+         out_dir <- file.path(qed_ssp_corr_dir, m, s, tier)
          dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
 
          res <- tryCatch({
@@ -234,7 +357,7 @@ for (model in models_ssp) {
                fc <- fits_cache[[id]][[var]]
                if (is.null(fc) || is.null(fc$fits)) {
                   summary_rows[[n_row <- n_row + 1L]] <- data.frame(
-                     model, ssp = s, id, var, tier,
+                     m, ssp = s, id, var, tier,
                      status = if (is.null(fc)) "skipped_no_hist_fit"
                               else fc$status,
                      n_overlap = if (is.null(fc)) NA_integer_
@@ -245,7 +368,7 @@ for (model in models_ssp) {
                }
                if (is.null(ssp_agg[[var]])) {
                   summary_rows[[n_row <- n_row + 1L]] <- data.frame(
-                     model, ssp = s, id, var, tier, status = "skipped_ssp_agg_missing",
+                     m, ssp = s, id, var, tier, status = "skipped_ssp_agg_missing",
                      n_overlap = NA_integer_, n_extrap = NA_integer_,
                      frac_extrap = NA_real_)
                   next
@@ -268,8 +391,12 @@ for (model in models_ssp) {
                   if (is.null(f)) f <- fc$fits[["annual"]]
                   if (is.null(f)) stop(sprintf(
                      "%s/%s/%s/%s: no fit for season %s and no annual fallback",
-                     model, s, id, var, sn))
-                  rr <- qed_apply_eqm(src_all[w], f, extrap)
+                     m, s, id, var, sn))
+                  rr <- qed_ssp_apply_eqm(src_all[w], f, extrap,
+                                          per_tail = identical(var, "pr") &&
+                                             qed_ssp_pr_per_tail,
+                                          ceiling = if (identical(var, "pr"))
+                                             qed_ssp_pr_ceiling else Inf)
                   appl$x_corrected[w]       <- rr$x_corrected
                   appl$within_range[w]      <- rr$within_range
                   appl$extrapolated_low[w]  <- rr$extrapolated_low
@@ -284,7 +411,7 @@ for (model in models_ssp) {
                bad <- sum(is.na(appl$x_corrected) & !is.na(appl$x_src))
                if (bad > 0) stop(sprintf(
                   "%s/%s/%s/%s: %d corrected NaN with valid source",
-                  model, s, id, var, bad))
+                  m, s, id, var, bad))
 
                out <- data.table::data.table(
                   date = src_date, source_value = appl$x_src,
@@ -293,26 +420,37 @@ for (model in models_ssp) {
                data.table::fwrite(out,
                   file.path(out_dir, paste0(id, "_", var, ".csv")))
 
+               if (var == "pr") {
+                  qed50_pr_max   <- max(qed50_pr_max,
+                                        max(out$corrected_value, na.rm = TRUE))
+                  qed50_pr_gt500 <- qed50_pr_gt500 +
+                     sum(out$corrected_value > 500, na.rm = TRUE)
+                  qed50_pr_capped <- qed50_pr_capped +
+                     sum(out$method_flag == "extrapolated_high" &
+                            out$corrected_value >= qed_ssp_pr_ceiling,
+                         na.rm = TRUE)
+               }
+
                n_extrap <- sum(appl$extrapolated_low |
                                   appl$extrapolated_high)
                summary_rows[[n_row <- n_row + 1L]] <- data.frame(
-                  model, ssp = s, id, var, tier, status = fc$status,
+                  m, ssp = s, id, var, tier, status = fc$status,
                   n_overlap = fc$n_overlap, n_extrap = n_extrap,
                   frac_extrap = round(n_extrap / length(src_date), 4))
             }
             "ok"
          }, error = function(e) {
-            qed_log(paste("ERROR", model, s, id, conditionMessage(e)),
+            qed_log(paste("ERROR", m, s, id, conditionMessage(e)),
                     qed_ssp_log_file)
             paste("error:", conditionMessage(e))
          })
       }
       rm(ssp_agg); invisible(gc())
-      qed_log(paste("ssp done:", model, s), qed_ssp_log_file)
+      qed_log(paste("ssp done:", m, s), qed_ssp_log_file)
    }
 
    rm(hist_agg, fits_cache, agg_pr, agg_tx, agg_tn); invisible(gc())
-   qed_log(paste("model done:", model), qed_ssp_log_file)
+   qed_log(paste("model done:", m), qed_ssp_log_file)
 }
 
 qed50_summary <- data.table::rbindlist(summary_rows, fill = TRUE)
@@ -334,6 +472,15 @@ print(one[, .N, by = method_flag])
 cat("gap rule: 'source_nan' includes Feb-29 of noleap models AND the\n",
     "2061-2080 window gap -- downstream counts these in n_gap_filled,\n",
     "never fills silently.\n")
+
+# tail-fix check: a corrected daily pr must stay physically plausible
+cat(sprintf("max corrected pr written: %.2f mm/d | days > 500 mm/d: %d | days at the %g mm/d ceiling: %d\n",
+            qed50_pr_max, qed50_pr_gt500, qed_ssp_pr_ceiling, qed50_pr_capped))
+qed_log(sprintf("tail fix check: max corrected pr = %.2f mm/d, days > 500 = %d, days at ceiling = %d",
+                qed50_pr_max, qed50_pr_gt500, qed50_pr_capped), qed_ssp_log_file)
+if (qed50_pr_max > 1000) stop(
+   "corrected pr exceeds 1000 mm/d -- tail extrapolation is still broken")
+
 qed_log(paste("QED_50 done:", qed_extrap_pr, "tail,", length(made),
               "pr series"), qed_ssp_log_file)
 ```

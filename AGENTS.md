@@ -62,7 +62,7 @@ not the product. Portfolio plan: `research_plan/PAPER_PORTFOLIO.md` (3–4 paper
 | `HYD_00–30` `.Rmd` | GR4J calibration/discharge evaluation notebooks (setup → inputs → calibrate → simulate) |
 | `data_processed/` | Outputs incl. `hyd/model_shortlist_final.csv` (14-model hybrid shortlist) |
 | `India_Shp/` | India shapefiles for mapping |
-| `manuscript/` | `paper.md` and manuscript assets |
+| `manuscript/` | `paper.md`, `NOVELTY_AND_ANOVA_SPEC.md` (binding novelty + ANOVA spec, v2 23 Nov 2026), `H4_PIPELINE.md` (H4 data flow), `AGENT_LOG.md` and manuscript assets |
 | `LOWFLOW_*`, `PROP_*`, `DECOMP_*`, `BENCH_*` | New modules to be added (see phase map below) — parallel to existing notebooks, never edits them |
 
 ## Data in play
@@ -91,6 +91,12 @@ not the product. Portfolio plan: `research_plan/PAPER_PORTFOLIO.md` (3–4 paper
 | **CAMELS-IND** (Mangukiya et al. 2025, ESSD) + **CAMELS-IND-Proj** (Singh et al. 2026, Zenodo 21775597; 13 GCMs × 4 SSPs, LSTM) + MARRMoT adequacy benchmark (Mangukiya et al. 2026, WRR) | Datasets, regional LSTM projections, model-adequacy benchmarking | No low-flow-aware analysis of their own product yet; LSTM dry tail unaudited; we are the first critical process-based user (H5). Their forcings inherit Mishra 2020 bias correction — another reason they must never be our substrate |
 | **Sharma, Barbhuiya & Gupta 2026** (Hydrol. Process. 40(3), e70476; IIT Mandi) — closest prior art | India-wide future streamflow, 4 structures (MILC/GR4J/HBV/HYMOD), 12 GCMs, 128 basins | No GR6J, no low-flow-specific selection, no forcing-vs-low-flow rank-divergence test, no propagation-time selection, no uncertainty decomposition |
 | Tiwary & Mondal 2026 (EGU abstract) | Historical Q7min trends on 55 minimally-regulated CAMELS-IND catchments | Historical description only; our work is projections + selection + uncertainty |
+| **Park, Kim, Sung & Chung 2025** (J. Hydrol.: Reg. Stud. 62:102991, doi:10.1016/j.ejrh.2025.102991) | ANOVA of uncertainty contributions to hydrologic drought projection, South Korea | Method borrowed (concede, cite); Korea not India; no GR4J/GR6J axis; no tail-policy factor. Verify its exact factor list at camera-ready |
+| **Kim & Chung 2026** (HESS 30:227–247, doi:10.5194/hess-30-227-2026) | ANOVA of GCM × SSP × calibration-condition × calibration-length, future drought, South Korea (SWAT, SDI; GCM > 60% for runoff, calibration-related 3.9–9.8%) | Method borrowed; single structure (SWAT) so no structural axis; no bias-correction factor. **Cite in §2 AND §4.2 — HESS is a P1 target journal** |
+| Senatore et al. 2022 (Mediterranean ANOVA of GCM + bias correction; verify full citation at camera-ready) | ANOVA with bias-correction method as a factor | Method borrowed; this is why P4's claim must say **"tail design"**, never "bias correction" generically |
+| **Cannon, Sobie & Murdock 2015** (J. Climate 28(17):6938–6959, doi:10.1175/JCLI-D-14-00754.1) | Quantile-mapping algorithms modify trends/quantiles/extremes; tail behaviour is a documented sensitivity | Not a competitor — the methodological anchor for the `tail_policy` factor; cite in §4.2/§4.3 next to the tail-policy definition |
+| **Themeßl, Gobiet & Heinrich 2012** (Climatic Change 112(2):449–468) | Error-correction method choice materially alters the climate-change signal | Same anchoring role as Cannon 2015; cite alongside it |
+| Liu et al. 2025 (Atmosphere 16(6):691, doi:10.3390/atmos16060691 — **journal corrected 23 Nov 2026, was mis-cited "Climate"**) | CMIP6 selection + streamflow + hydrological drought (SWAT+MODFOOD) | Single-basin scale; no 192-catchment out-of-sample rank; no rank-divergence test. Complete author list at camera-ready |
 
 ## Roadmap mapping (5-year Low-Flow & Drought programme, `Low-Flow-Profile/`)
 
@@ -115,6 +121,43 @@ attributes — flagged as a limitation in the current paper, not promised in it.
 - **Logs:** `data_processed/logs/<module>_exclusions.csv` with columns
   `module, catchment, reason_code, detail`.
 
+## Novelty framing & roster discipline (spec v2, 23 Nov 2026 — binding)
+
+Full spec: `manuscript/NOVELTY_AND_ANOVA_SPEC.md`. Summary rules every agent
+must follow when touching `paper.md`:
+
+1. **Headline (use verbatim or near-verbatim):** the first low-flow-aware
+   CMIP6 model-selection framework for Peninsular India — ρ-divergence test +
+   GR4J/GR6J structural axis + propagation-reproduction selection +
+   three-factor decomposition with **bias-correction tail design** as an
+   explicit uncertainty source. "Combination novelty" — never claim a new
+   method. ANOVA (Park 2025; Kim & Chung 2026; Senatore 2022), the low-flow
+   metrics, and the SPI/SRI index are **borrowed**; the axes, the selection
+   logic and the application are new.
+2. **Pillar claims / do-not-claims:** P2 (GR4J/GR6J axis) is the strongest —
+   lead the contribution list with it, never claim GR6J is "better".
+   P4: claim the *factor set* (tail-design axis, anchored by Cannon 2015 and
+   Themeßl 2012), always say "tail design/tail policy", never "bias
+   correction" generically. P1: the ρ-divergence *test* is the claim, the
+   metrics are standard; report ρ = −0.027 with CI, never the pilot 0.14.
+   P3: the *selection use* of propagation lag is the claim, the index is
+   standard, the Machhar near-identity trap is forbidden. P5: we own the
+   *audit lens*, not the projections; the number "239" must never appear
+   (failed the in-data check 19 Nov).
+3. **Roster numbers are exact and never interchangeable** (472 = the setting;
+   242 = forcing evaluation; **192 = every H2/H4 claim**, 64/64/64 terciles;
+   172 = H2 base case; 78 = H1 composite and H5 volume/dry-spell rates; 167 =
+   frozen propagation lags; 22 = historical GCM pool; 14/13/13/14 =
+   projection GCM coverage; 12 = H5 overlap; 11,520 = ANOVA cells; 180 =
+   summary cells for the decision rule). Never let "472" attach to any
+   ANOVA, divergence or correlation sentence.
+4. **No per-cell significance in H4** (saturated design — see H4 above);
+   any test introduced by a sensitivity is BH-corrected within its own family
+   and labelled sensitivity. Shares are never averaged across metrics, SSPs,
+   windows or terciles.
+5. **Do not soften a negative H4** (structure < 5% everywhere is reportable),
+   and **§5.5 must not be written before `h4_verdict.md` exists**.
+
 ## The five hypotheses (decision rules)
 
 - **H1** — Forcing-skill rank and low-flow-skill rank diverge (pilot ρ = 0.14).
@@ -128,6 +171,22 @@ attributes — flagged as a limitation in the current paper, not promised in it.
 - **H4** — GCM dominates low-flow projection variance; structure share non-negligible
   (≥5% matters for adaptation). Fails if structure share < 5% everywhere → still a
   useful negative result.
+  - **ANOVA spec (binding: `manuscript/NOVELTY_AND_ANOVA_SPEC.md` v2, 23 Nov 2026).**
+    The per-cell factorial is **saturated** (56 or 52 observations = the full
+    parameter count → 0 residual df), so the per-cell analysis is an **exact
+    variance partition — no F, no p, no per-cell η²p or ω²** (η²p ≡ 1 under
+    saturation; ω² undefined). The SS share over the **seven** terms (3 main
+    effects + three 2-way + the 3-way interaction) **is** classical η² in this
+    balanced design; the 3-way interaction is always reported, never buried in a
+    residual.
+  - Inference = the pre-registered 5% disjunction rule + the **catchment**
+    bootstrap (1,000 resamples, seed 20261118) — resample catchments, never rows.
+  - GCM is a **fixed** factor (stated shortlist, not sampled): shares do not
+    generalise beyond it; coverage is 14/13/13/14 GCMs for ssp126/245/370/585,
+    stated everywhere, never padded.
+  - `lme4::lmer(value ~ structure * tail_policy + (1|gcm))` is the one H4 model
+    with an error term — a labelled sensitivity (supplement), never the primary
+    result.
 - **H5** — LSTM projections do not uniformly beat GR4J/GR6J at low flows (esp.
   semi-arid, hard-rock). Fails if LSTM dominates on all low-flow metrics → publish as
   benchmark confirmation, framed as such from the outset.

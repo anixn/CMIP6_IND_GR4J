@@ -1,0 +1,7 @@
+catchment,metric,ssp,window,reason_code
+08023,lf_ratio_q95,ssp245,2021-2040,zero_variance_or_insufficient_levels
+08023,lf_ratio_q95,ssp245,2041-2060,zero_variance_or_insufficient_levels
+08023,lf_ratio_q95,ssp370,2041-2060,zero_variance_or_insufficient_levels
+08023,lf_ratio_q95,ssp370,2082-2100,zero_variance_or_insufficient_levels
+08023,lf_ratio_q95,ssp585,2021-2040,zero_variance_or_insufficient_levels
+08023,lf_ratio_q95,ssp585,2041-2060,zero_variance_or_insufficient_levels

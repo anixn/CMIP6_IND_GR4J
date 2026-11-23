@@ -1,0 +1,7 @@
+module,model,ssp,var,years_missing,reason_code,checked,note
+QED_40,HadGEM3-GC31-MM,ssp245,pr,66,gcm_scenario_not_published,2026-11-21,not published in CMIP6 ScenarioMIP on ESGF (query 21 Nov 2026)
+QED_40,HadGEM3-GC31-MM,ssp245,tasmax,66,gcm_scenario_not_published,2026-11-21,not published in CMIP6 ScenarioMIP on ESGF (query 21 Nov 2026)
+QED_40,HadGEM3-GC31-MM,ssp245,tasmin,66,gcm_scenario_not_published,2026-11-21,not published in CMIP6 ScenarioMIP on ESGF (query 21 Nov 2026)
+QED_40,HadGEM3-GC31-MM,ssp370,pr,66,gcm_scenario_not_published,2026-11-21,not published in CMIP6 ScenarioMIP on ESGF (query 21 Nov 2026)
+QED_40,HadGEM3-GC31-MM,ssp370,tasmax,66,gcm_scenario_not_published,2026-11-21,not published in CMIP6 ScenarioMIP on ESGF (query 21 Nov 2026)
+QED_40,HadGEM3-GC31-MM,ssp370,tasmin,66,gcm_scenario_not_published,2026-11-21,not published in CMIP6 ScenarioMIP on ESGF (query 21 Nov 2026)

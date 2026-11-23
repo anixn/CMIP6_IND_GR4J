@@ -1,0 +1,551 @@
+---
+title: "DECOMP 10 -- SSP projection metrics: GR4J x GR6J x EQM tail policy"
+subtitle: "Phase 4 of the low-flow framework (H4 / Objective 4) -- assembles data_processed/decomp/input_metrics.csv for DECOMP_00"
+output:
+   html_document:
+      css: style_academic.css
+---
+
+```{r source-setup, include=FALSE}
+knitr::purl("HYD_00_setup.Rmd", file.path(tempdir(), "hyd00_setup.R"), documentation = 2)
+source(file.path(tempdir(), "hyd00_setup.R"))
+```
+
+# Notebook 10 -- Projection metrics for the H4 decomposition
+
+**What this notebook does.** `DECOMP_00_anova.Rmd` needs one long-format table
+with a complete `gcm x structure x tail_policy` factorial per catchment, metric,
+SSP and future window. Nothing in the repository produced it: `LOWFLOW_00`
+computes *skill* metrics against observations on 2001-2014, and `GR6J_30`
+computes *structural divergence* on the same historical window. This module
+supplies the missing **projection** layer:
+
+1. reads the bias-corrected SSP forcings from `QED_50`
+   (`data_processed/ssp/qm_corrected_<policy>/<gcm>/<ssp>/<tier>/<id>_<var>.csv`)
+   for **both** pre-registered EQM tail policies (`linear`, `constant`);
+2. builds Oudin PET (identical to calibration) and drives the catchment's
+   **calibrated GR4J** (`data_processed/hyd/params/<id>.rds`) and
+   **calibrated GR6J** (`data_processed/gr6j/params/<id>.rds`) -- same params,
+   same warm-up rule, same PET, only the structure differs;
+3. computes low-flow **indicators** (not biases: there is no future
+   observation) over three future windows, and writes the factor-tagged long
+   table `data_processed/decomp/input_metrics.csv`.
+
+**Why indicators and not the LOWFLOW_00 bias metrics.** Skill metrics need
+observed discharge; projections do not have any. The decomposition instead asks
+how much a low-flow *indicator* moves with GCM choice, with structure, and with
+the EQM tail policy. Indicators stay physically interpretable and are never
+blended (one ANOVA per metric, per AGENTS.md guardrail 5).
+
+**Pre-registered design (recorded here, 2026-11-21, before any H4 result exists):**
+
+| item | value |
+|---|---|
+| projection windows | `2021-2040`, `2041-2060`, `2082-2100` |
+| archive gap | the SSP archive has **no 2061-2080 files at all** (66 of 86 years per combo, verified on `D:/Datasets/Download_CMIP/SSP`), so that period is excluded, never interpolated; the far window therefore starts in 2082 and is 19 years long |
+| warm-up | **365 days immediately before each window** (2020, 2040, 2081) -- the repository-wide rule from `HYD_00`; no warm-up ever crosses the gap |
+| low-flow threshold | `dry_spell_days` uses each window's **own** Q90 (10th percentile, type 7): it is a persistence indicator and must stay defined even where future flows sit above the historical threshold |
+| metrics | `log10_q95`, `log10_mam7`, `log10_meanq`, `lf_ratio_q95`, `dry_spell_days` (section 4) |
+| factors | `gcm` (14; 13 for ssp245/ssp370), `structure` (GR4J/GR6J), `tail_policy` (linear/constant) |
+| `metric_version` | `v1_proj` |
+
+**Dated design note (2026-11-21, before any H4 result).** Two frozen-threshold
+drought-exposure metrics (`lf_deficit_mm`, `dry_spell_days` against the observed
+1981-2000 Q90) were piloted and **dropped**: in the pilot they were identically
+zero for most cells, because projected flows sit above the historical 10th
+percentile. A zero-variance response carries no variance share to decompose.
+They are replaced by the threshold-free `lf_ratio_q95` (shape of the low tail)
+and a window-relative `dry_spell_days` (persistence). This is a metric-design
+decision made and recorded before the decomposition was run, not after seeing
+an H4 outcome.
+
+**Known and explicit limitation (AGENTS.md guardrail 7).** `HadGEM3-GC31-MM`
+ssp245/ssp370 are not published on ESGF (`data_processed/logs/ssp_unavailable.csv`,
+`gcm_scenario_not_published`). H4 therefore runs a **13-GCM factorial for
+ssp245/ssp370** and a **14-GCM factorial for ssp126/ssp585**. Both are balanced,
+which is all the ANOVA requires; the reduced set is never padded or smoothed
+away, and `h4_gcm_coverage.csv` records it.
+
+```{r log-file}
+dec_output_dir <- file.path(hyd_project_root, "data_processed", "decomp")
+dir.create(dec_output_dir, recursive = TRUE, showWarnings = FALSE)
+dir.create(file.path(hyd_project_root, "data_processed", "logs"),
+           recursive = TRUE, showWarnings = FALSE)
+dec_log_file <- file.path(dec_output_dir, "decomp_10_log.txt")
+dec_excl_fp  <- file.path(hyd_project_root, "data_processed", "logs",
+                          "DECOMP_10_exclusions.csv")
+gr6j_dir     <- file.path(hyd_project_root, "data_processed", "gr6j")
+ssp_dir      <- file.path(hyd_project_root, "data_processed", "ssp")
+
+dec_log <- function(msg) {
+   line <- paste0(format(Sys.time(), "%Y-%m-%d %H:%M:%S"), " | ", msg)
+   cat(line, "\n")
+   cat(line, "\n", file = dec_log_file, append = TRUE)
+}
+```
+
+## 1. Configuration
+
+```{r config}
+dec_metric_version <- "v1_proj"
+# Explicit, visible switches (same style as qed50_test_mode): production is
+# TEST=0 / POLICIES=linear,constant. The knobs exist so a smoke test and a
+# single-policy rerun never need a code edit -- and both are logged below.
+dec_test_mode <- identical(Sys.getenv("DECOMP_TEST", "0"), "1")
+dec_policies  <- strsplit(Sys.getenv("DECOMP_POLICIES", "linear,constant"),
+                          ",", fixed = TRUE)[[1]]
+dec_structures     <- c("GR4J", "GR6J")
+dec_metrics_vec    <- c("log10_q95", "log10_mam7", "log10_meanq",
+                        "lf_ratio_q95", "dry_spell_days")
+dec_log_eps        <- 0.01        # mm/day, log offset (same as LOWFLOW_00)
+dec_q90_prob       <- 0.10        # exceedance 90 % -> 10th percentile
+dec_q95_prob       <- 0.05        # exceedance 95 % -> 5th percentile
+dec_spell_w        <- 7L          # MAM7 trailing window (days)
+
+# The archive has no 2061-2080 files, so each window is preceded by exactly one
+# year of real warm-up (HYD_00's rule) and never by interpolated data.
+dec_windows <- data.table::data.table(
+   window     = c("2021-2040", "2041-2060", "2082-2100"),
+   start      = as.Date(c("2021-01-01", "2041-01-01", "2082-01-01")),
+   end        = as.Date(c("2040-12-31", "2060-12-31", "2100-12-31")),
+   warm_start = as.Date(c("2020-01-01", "2040-01-01", "2081-01-01")))
+
+# quick-test mode: small, but still a full factorial per catchment
+dec_test_ids   <- c("03002", "03005", "03008")
+dec_test_gcms  <- c("ACCESS-ESM1-5", "CanESM5")
+dec_test_ssps  <- c("ssp245")
+dec_test_ncat  <- 3L              # cap on catchments in test mode
+
+cat("policies  :", paste(dec_policies, collapse = ", "), "\n")
+cat("structures:", paste(dec_structures, collapse = ", "), "\n")
+cat("windows   :", paste(dec_windows$window, collapse = ", "), "\n")
+cat("metrics   :", paste(dec_metrics_vec, collapse = ", "), "\n")
+cat("test mode :", dec_test_mode, "\n")
+```
+
+## 2. Roster: catchments calibrated under **both** structures
+
+```{r roster}
+g4 <- data.table::fread(file.path(hyd_output_dir, "hyd_calib_summary.csv"),
+                        colClasses = list(character = "id"))
+g6 <- data.table::fread(file.path(gr6j_dir, "gr6j_calib_summary.csv"),
+                        colClasses = list(character = "id"))
+g4 <- g4[status == "calibrated"]; g6 <- g6[status == "calibrated"]
+
+roster <- data.table::data.table(id = intersect(g4$id, g6$id))
+
+# QED tier decides the corrected-series sub-directory
+inv <- data.table::fread(file.path(hyd_qed_dir, "inventory.csv"),
+                         colClasses = list(character = "id"))
+roster <- merge(roster, inv[, .(id, tier = final_action)], by = "id", all.x = TRUE)
+roster <- roster[tier %in% c("tier1", "tier2")]
+
+# latitude for Oudin PET
+topo <- data.table::fread(hyd_topo_fp, colClasses = list(character = "gauge_id"))
+topo[, id := hyd_normalize_id(gauge_id)]
+roster <- merge(roster, topo[, .(id, cwc_lat)], by = "id", all.x = TRUE)
+
+# aridity tercile -- the same definition GR6J_30 used (PET/P on observed inputs)
+arid <- data.table::fread(file.path(gr6j_dir, "struct_metrics.csv"),
+                          colClasses = list(character = "catchment"))
+arid <- unique(arid[, .(id = catchment, arid_tercile)])
+roster <- merge(roster, arid, by = "id", all.x = TRUE)
+
+# parameters must exist for both structures
+roster <- roster[file.exists(file.path(hyd_output_dir, "params", paste0(id, ".rds"))) &
+                 file.exists(file.path(gr6j_dir, "params", paste0(id, ".rds")))]
+
+if (dec_test_mode) roster <- utils::head(roster[id %in% dec_test_ids], dec_test_ncat)
+
+cat("Catchments to project:", nrow(roster), "\n")
+print(table(roster$tier))
+print(table(roster$arid_tercile, useNA = "ifany"))
+stopifnot(nrow(roster) > 0)
+```
+
+## 3. Corrected-forcing inventory (gcm x ssp x policy)
+
+```{r inventory}
+# discover what QED_50 actually wrote; never assume a model/scenario exists
+dec_scan <- function(pdir, policy) {
+   models <- list.dirs(pdir, recursive = FALSE, full.names = FALSE)
+   out <- lapply(models, function(m) {
+      ssps <- list.dirs(file.path(pdir, m), recursive = FALSE, full.names = FALSE)
+      if (!length(ssps)) return(NULL)
+      data.table::data.table(gcm = m, ssp = ssps)
+   })
+   dt <- data.table::rbindlist(out, use.names = TRUE)
+   if (!nrow(dt)) return(NULL)
+   dt[, tail_policy := policy]
+   dt
+}
+
+dec_inv <- list()
+for (pol in dec_policies) {
+   pdir <- file.path(ssp_dir, paste0("qm_corrected_", pol))
+   if (!dir.exists(pdir)) {
+      dec_log(paste("policy root absent, skipped:", basename(pdir)))
+      next
+   }
+   ii <- dec_scan(pdir, pol)
+   if (!is.null(ii)) dec_inv[[pol]] <- ii
+}
+dec_inv <- data.table::rbindlist(dec_inv, use.names = TRUE)
+
+if (dec_test_mode) dec_inv <- dec_inv[gcm %in% dec_test_gcms & ssp %in% dec_test_ssps]
+data.table::setorder(dec_inv, tail_policy, gcm, ssp)
+
+cat("gcm x ssp x policy combos:", nrow(dec_inv), "\n")
+print(dec_inv[, .N, by = tail_policy])
+cat("distinct GCMs per ssp x policy:\n")
+print(dec_inv[, .(n_gcm = data.table::uniqueN(gcm)), by = .(ssp, tail_policy)])
+```
+
+## 4. Low-flow indicators (guarded; every guard returns NA + a reason code)
+
+Each indicator is computed **inside the projection window only** (the warm-up
+year is discarded). `dry_spell_days` uses that same window's own Q90, so the
+indicator is always defined; the other four are threshold-free. Because the
+formula, the window and the parameter set are identical across cells, the only
+things that differ between cells of a factorial are the three H4 factors.
+
+```{r metric-fns}
+# trailing 7-day mean -> mean annual minimum (extreme low flow)
+dec_mam7 <- function(q, dates) {
+   roll <- data.table::frollmean(q, n = dec_spell_w)
+   yr   <- as.integer(format(dates, "%Y"))
+   ym   <- tapply(roll, yr, min, na.rm = TRUE)
+   ym   <- ym[is.finite(ym)]
+   if (!length(ym)) return(NA_real_)
+   mean(ym)
+}
+
+# mean annual maximum run of consecutive days below `thr` (persistence);
+# an NA day ends a spell, so gaps can only shorten a spell (conservative)
+dec_dry_spell <- function(q, dates, thr) {
+   yr <- as.integer(format(dates, "%Y"))
+   below <- !is.na(q) & q < thr
+   per_year <- tapply(below, yr, function(b) {
+      r <- rle(as.logical(b))
+      if (!any(r$values)) 0L else max(r$lengths[r$values])
+   })
+   if (!length(per_year)) return(NA_real_)
+   mean(per_year)
+}
+
+dec_metric_values <- function(q, dates) {
+   qv <- q[!is.na(q)]
+   if (length(qv) < 365) {
+      return(stats::setNames(rep(NA_real_, length(dec_metrics_vec)),
+                             dec_metrics_vec))
+   }
+   q95   <- stats::quantile(qv, dec_q95_prob, names = FALSE, type = 7)
+   q90_w <- stats::quantile(qv, dec_q90_prob, names = FALSE, type = 7)
+   qmean <- mean(qv)
+   mam7  <- dec_mam7(q, dates)
+   c(log10_q95     = log10(q95 + dec_log_eps),
+     log10_mam7    = if (!is.finite(mam7)) NA_real_ else log10(mam7 + dec_log_eps),
+     log10_meanq   = log10(qmean + dec_log_eps),
+     lf_ratio_q95  = q95 / max(qmean, dec_log_eps),
+     dry_spell_days= dec_dry_spell(q, dates, q90_w))
+}
+
+dec_na_reason <- function(metric) {
+   data.table::fcase(
+      metric %in% c("log10_q95", "log10_meanq", "lf_ratio_q95") ~
+         "insufficient_window_days",
+      metric == "log10_mam7" ~ "mam7_degenerate",
+      metric == "dry_spell_days" ~ "dry_spell_degenerate",
+      default = "metric_guard")
+}
+```
+
+## 5. Simulation core (identical PET / gap rules to HYD_30 and LOWFLOW_00)
+
+```{r sim-fns}
+dec_gapfill <- function(x) {
+   i_na <- which(is.na(x))
+   if (!length(i_na) || all(is.na(x))) return(x)
+   x[i_na] <- stats::approx(seq_along(x), x, xout = i_na, rule = 2)$y
+   x
+}
+
+# read one corrected series (policy-scoped)
+dec_read_corrected <- function(policy, gcm, ssp, tier, id, var) {
+   fp <- file.path(ssp_dir, paste0("qm_corrected_", policy), gcm, ssp, tier,
+                   paste0(id, "_", var, ".csv"))
+   if (!file.exists(fp)) return(NULL)
+   dt <- data.table::fread(fp, select = c("date", "corrected_value", "method_flag"))
+   data.table::setnames(dt, c("corrected_value", "method_flag"),
+                        c(var, paste0("flag_", var)))
+   dt[]
+}
+
+# forcing bundle for catchment x gcm x ssp x policy, gap-filled and with PET.
+# Gap filling happens ONCE on the full requested span (noleap Feb-29 -> NA):
+# pr -> 0 mm (conservative), temperatures -> neighbour interpolation, and the
+# filled days are flagged per date so each window can count its own share.
+dec_forcing <- function(policy, gcm, ssp, tier, id, lat, keep_dates) {
+   pc <- dec_read_corrected(policy, gcm, ssp, tier, id, "pr")
+   tx <- dec_read_corrected(policy, gcm, ssp, tier, id, "tasmax")
+   tn <- dec_read_corrected(policy, gcm, ssp, tier, id, "tasmin")
+   if (is.null(pc) || is.null(tx) || is.null(tn)) return(NULL)
+
+   dt <- Reduce(function(x, y) merge(x, y, by = "date", all = TRUE),
+                list(pc, tx, tn))
+   dt[, date := as.Date(date)]
+   dt <- dt[date %in% keep_dates]
+   data.table::setorder(dt, date)
+
+   dt[, Tmean_C := (tasmax + tasmin) / 2]
+   dt[, gap_day := is.na(pr) | is.na(tasmax) | is.na(tasmin) | is.na(Tmean_C)]
+   n_gap_total <- sum(dt$gap_day)
+   if (n_gap_total) {
+      dt[, `:=`(pr     = { v <- dec_gapfill(pr);     v[is.na(v)] <- 0; v },
+                tasmax = dec_gapfill(tasmax),
+                tasmin = dec_gapfill(tasmin),
+                Tmean_C = dec_gapfill(Tmean_C))]
+      if (anyNA(dt$Tmean_C)) stop("unfillable input gaps (n=", n_gap_total, ")")
+   }
+   dt[, PET_mm := airGR::PE_Oudin(
+         JD = as.integer(format(date, "%j")), Temp = Tmean_C,
+         Lat = lat, LatUnit = "deg")]
+   dt[]
+}
+
+# run one structure over one window; returns qsim, dates and per-window counters
+dec_run_window <- function(dt, w, struct, params) {
+   dates_w <- seq(w$warm_start, w$end, by = "day")
+   if (!identical(dt$date, dates_w)) {
+      stop("forcing dates do not match the window span")
+   }
+
+   n_warm <- sum(dates_w < w$start)
+   i_warm <- seq_len(n_warm)
+   i_run  <- seq.int(n_warm + 1L, length(dates_w))
+
+   FUN <- if (identical(struct, "GR4J")) airGR::RunModel_GR4J
+          else airGR::RunModel_GR6J
+
+   inputs <- airGR::CreateInputsModel(FUN_MOD = FUN,
+                                      DatesR  = as.POSIXct(dates_w),
+                                      Precip  = dt$pr,
+                                      PotEvap = dt$PET_mm)
+   run_opt <- airGR::CreateRunOptions(FUN_MOD = FUN, InputsModel = inputs,
+                                      IndPeriod_WarmUp = i_warm,
+                                      IndPeriod_Run    = i_run)
+   out <- airGR::RunModel(inputs, run_opt, Param = params, FUN_MOD = FUN)
+
+   w_dt <- dt[i_run]
+   flags <- c(w_dt$flag_pr, w_dt$flag_tasmax, w_dt$flag_tasmin)
+   list(qsim     = as.numeric(out$Qsim),
+        dates    = w_dt$date,
+        n_gap    = as.integer(sum(w_dt$gap_day)),
+        n_extrap = sum(flags != "within_range", na.rm = TRUE))
+}
+```
+
+## 6. Run: catchment x policy x gcm x ssp x structure x window
+
+```{r run, eval=TRUE}
+rows <- list(); excl <- list()
+n_row <- 0L; n_excl <- 0L
+t_start <- Sys.time()
+
+# every date needed by any window (the 2061-2080 gap is never requested)
+keep_dates <- sort(unique(as.Date(unlist(lapply(seq_len(nrow(dec_windows)),
+   function(k) seq(dec_windows$warm_start[k], dec_windows$end[k], by = "day"))))))
+
+for (i in seq_len(nrow(roster))) {
+   id   <- roster$id[i]
+   tier <- roster$tier[i]
+   lat  <- roster$cwc_lat[i]
+   terc <- roster$arid_tercile[i]
+
+   p4 <- readRDS(file.path(hyd_output_dir, "params", paste0(id, ".rds")))$param
+   p6 <- readRDS(file.path(gr6j_dir, "params", paste0(id, ".rds")))$param
+   par_list <- list(GR4J = p4, GR6J = p6)
+
+   for (k in seq_len(nrow(dec_inv))) {
+      pol <- dec_inv$tail_policy[k]; gcm <- dec_inv$gcm[k]; ssp <- dec_inv$ssp[k]
+      key <- paste(id, pol, gcm, ssp)
+
+      f <- tryCatch(dec_forcing(pol, gcm, ssp, tier, id, lat, keep_dates),
+                    error = function(e) {
+                       n_excl <<- n_excl + 1L
+                       excl[[n_excl]] <<- data.table::data.table(
+                          module = "DECOMP_10", catchment = id,
+                          reason_code = "forcing_read_error",
+                          detail = paste(key, conditionMessage(e)))
+                       NULL
+                    })
+      if (is.null(f)) next
+
+      for (wd in seq_len(nrow(dec_windows))) {
+         w   <- dec_windows[wd]
+         sub <- f[date >= w$warm_start & date <= w$end]
+         if (nrow(sub) != length(seq(w$warm_start, w$end, by = "day"))) {
+            n_excl <- n_excl + 1L
+            excl[[n_excl]] <- data.table::data.table(
+               module = "DECOMP_10", catchment = id,
+               reason_code = "forcing_dates_incomplete",
+               detail = paste(key, w$window))
+            next
+         }
+
+         for (st in dec_structures) {
+            sim <- tryCatch(
+               dec_run_window(data.table::copy(sub), w, st, par_list[[st]]),
+               error = function(e) {
+                  n_excl <<- n_excl + 1L
+                  excl[[n_excl]] <<- data.table::data.table(
+                     module = "DECOMP_10", catchment = id,
+                     reason_code = "simulation_error",
+                     detail = paste(key, st, w$window, conditionMessage(e)))
+                  NULL
+               })
+            if (is.null(sim)) next
+
+            vals <- dec_metric_values(sim$qsim, sim$dates)[dec_metrics_vec]
+            note <- rep(NA_character_, length(vals))
+            na_i <- is.na(vals)
+            if (any(na_i)) note[na_i] <- dec_na_reason(dec_metrics_vec[na_i])
+            n_row <- n_row + 1L
+            rows[[n_row]] <- data.table::data.table(
+               catchment    = id,
+               arid_tercile = terc,
+               ssp          = ssp,
+               window       = w$window,
+               metric       = dec_metrics_vec,
+               gcm          = gcm,
+               structure    = st,
+               tail_policy  = pol,
+               value        = round(as.numeric(vals), 6),
+               metric_note  = note,
+               n_gap_filled        = sim$n_gap,
+               extrapolation_share = round(sim$n_extrap / (3 * length(sim$qsim)), 6),
+               pr_max_mm           = round(max(sub$pr, na.rm = TRUE), 4),
+               metric_version      = dec_metric_version)
+         }
+      }
+   }
+
+   dec_log(sprintf("catchment %s (%d/%d) | rows=%d | elapsed %.1f min",
+                   id, i, nrow(roster), n_row,
+                   as.numeric(difftime(Sys.time(), t_start, units = "mins"))))
+}
+
+dec_metrics_long <- data.table::rbindlist(rows, use.names = TRUE)
+data.table::fwrite(dec_metrics_long, file.path(dec_output_dir, "input_metrics.csv"))
+
+excl_dt <- data.table::rbindlist(excl, use.names = TRUE, fill = TRUE)
+if (nrow(excl_dt)) {
+   data.table::fwrite(excl_dt, dec_excl_fp)
+} else if (file.exists(dec_excl_fp)) {
+   # a stale exclusions file from an earlier run would be misinformation
+   # (guardrail 7: the file must reflect the CURRENT run)
+   file.remove(dec_excl_fp)
+   cat("stale exclusions file removed (current run had none)\n")
+}
+
+cat("rows written:", nrow(dec_metrics_long), "\n")
+cat("exclusions logged:", nrow(excl_dt), "\n")
+print(dec_metrics_long[, .N, by = .(tail_policy, structure)])
+print(dec_metrics_long[, .(n_gcm = data.table::uniqueN(gcm)), by = ssp])
+```
+
+## 7. Sanity checks (the H4 grid must be complete and balanced)
+
+```{r checks}
+# 1. every catchment x ssp x window cell must carry the full factorial
+cells <- dec_metrics_long[, .(n = .N), by = .(catchment, metric, ssp, window)]
+cat("cells (catchment x metric x ssp x window):", nrow(cells), "\n")
+shape <- dec_metrics_long[, .(n_gcm = data.table::uniqueN(gcm),
+                              n_struct = data.table::uniqueN(structure),
+                              n_policy = data.table::uniqueN(tail_policy),
+                              n = .N),
+                          by = .(catchment, metric, ssp, window)]
+shape[, balanced := n == n_gcm * n_struct * n_policy]
+cat("unbalanced cells:", sum(!shape$balanced), "\n")
+print(shape[, .(cells = .N, balanced = sum(balanced),
+                n_gcm = paste(sort(unique(n_gcm)), collapse = "/")),
+            by = .(ssp, window)])
+
+# 2. no metric may be all-NA for a whole cell
+nas <- dec_metrics_long[, .(frac_na = mean(is.na(value))),
+                        by = .(metric, ssp, window)]
+print(nas[order(-frac_na)][1:8])
+
+# 2b. every NA must carry a reason code (guardrail 7, no silent drops)
+stopifnot(all(c("catchment", "arid_tercile", "ssp", "window", "metric", "gcm",
+                "structure", "tail_policy", "value", "metric_note",
+                "n_gap_filled", "extrapolation_share", "metric_version") %in%
+              names(dec_metrics_long)))
+stopifnot(all(is.na(dec_metrics_long$value) ==
+                 !is.na(dec_metrics_long$metric_note)))
+if (anyNA(dec_metrics_long$value))
+   print(dec_metrics_long[is.na(value), .N, by = .(metric, metric_note)])
+
+# 3. flag propagation present on every row (AGENTS.md)
+stopifnot(!anyNA(dec_metrics_long$n_gap_filled),
+          !anyNA(dec_metrics_long$extrapolation_share))
+cat("flag columns complete on all rows\n")
+
+# 3b. no nonphysical input may reach the decomposition (tail-fix guard,
+#     2026-11-23: the pre-fix linear pr tail reached 4e9 mm/d)
+bad_pr <- dec_metrics_long[pr_max_mm > 1000]
+cat("rows with pr_max_mm > 1000:", nrow(bad_pr), "\n")
+if (nrow(bad_pr)) {
+   print(unique(bad_pr[, .(catchment, gcm, ssp, window, tail_policy, pr_max_mm)]))
+   stop("nonphysical corrected pr in the H4 input -- fix the upstream tail policy")
+}
+
+# 4. explicit record of the GCM set actually used per SSP
+gcm_tab <- dec_metrics_long[, .(n_gcm = data.table::uniqueN(gcm),
+                                gcms = paste(sort(unique(gcm)), collapse = ";")),
+                            by = ssp]
+print(gcm_tab[, .(ssp, n_gcm)])
+data.table::fwrite(gcm_tab, file.path(dec_output_dir, "h4_gcm_coverage.csv"))
+```
+
+## 8. Hand-off
+
+```{r handoff}
+writeLines(c(
+   "# DECOMP_10 hand-off",
+   "",
+   paste0("**Run:** ", format(Sys.time()), " | metric_version ", dec_metric_version),
+   paste0("**Rows:** ", nrow(dec_metrics_long)),
+   paste0("**Catchments:** ", data.table::uniqueN(dec_metrics_long$catchment)),
+   paste0("**Policies:** ", paste(sort(unique(dec_metrics_long$tail_policy)), collapse = ", ")),
+   paste0("**Structures:** ", paste(sort(unique(dec_metrics_long$structure)), collapse = ", ")),
+   paste0("**Windows:** ", paste(sort(unique(dec_metrics_long$window)), collapse = ", ")),
+   "",
+   "**GCM coverage (explicit, not balanced away):**",
+   paste0("- ", gcm_tab$ssp, ": ", gcm_tab$n_gcm, " GCMs"),
+   "- HadGEM3-GC31-MM ssp245/ssp370 are unpublished on ESGF",
+   "  (`logs/ssp_unavailable.csv`, `gcm_scenario_not_published`); H4 therefore",
+   "  runs a 13-GCM factorial for those two SSPs and a 14-GCM factorial for",
+   "  ssp126/ssp585. Each is balanced; neither is padded.",
+   "",
+   "Next: `rmarkdown::render('DECOMP_00_anova.Rmd')` consumes",
+   "`data_processed/decomp/input_metrics.csv`."),
+   file.path(dec_output_dir, "decomp_10_handoff.md"))
+
+writeLines(capture.output(sessionInfo()),
+           file.path(dec_output_dir, "decomp_10_session_info.txt"))
+cat("hand-off written\n")
+```
+
+## Take-away
+
+- `input_metrics.csv` is the single factor-tagged table `DECOMP_00` consumes:
+  `catchment`, `arid_tercile`, `ssp`, `window`, `metric`, `gcm`, `structure`,
+  `tail_policy`, `value`, `metric_note`, `n_gap_filled`,
+  `extrapolation_share`, `pr_max_mm`, `metric_version`.
+- Every value uses the same calibrated parameters, the same Oudin PET and the
+  same one-year warm-up rule -- so the three H4 factors are the only things
+  that differ between cells.
+- Every `NA` carries a `metric_note` reason code; nothing is dropped silently.
+- Nothing is averaged across metrics, and the 13-vs-14 GCM split is written to
+  `h4_gcm_coverage.csv` rather than smoothed over.

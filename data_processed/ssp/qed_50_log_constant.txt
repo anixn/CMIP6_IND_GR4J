@@ -1,0 +1,69 @@
+2026-11-23 10:27:45 | ssp done: ACCESS-ESM1-5 ssp126 
+2026-11-23 10:29:04 | ssp done: ACCESS-ESM1-5 ssp245 
+2026-11-23 10:30:23 | ssp done: ACCESS-ESM1-5 ssp370 
+2026-11-23 10:31:43 | ssp done: ACCESS-ESM1-5 ssp585 
+2026-11-23 10:31:43 | model done: ACCESS-ESM1-5 
+2026-11-23 10:33:47 | ssp done: BCC-CSM2-MR ssp126 
+2026-11-23 10:35:16 | ssp done: BCC-CSM2-MR ssp245 
+2026-11-23 10:36:37 | ssp done: BCC-CSM2-MR ssp370 
+2026-11-23 10:38:06 | ssp done: BCC-CSM2-MR ssp585 
+2026-11-23 10:38:06 | model done: BCC-CSM2-MR 
+2026-11-23 10:40:23 | ssp done: CanESM5 ssp126 
+2026-11-23 10:41:55 | ssp done: CanESM5 ssp245 
+2026-11-23 10:43:22 | ssp done: CanESM5 ssp370 
+2026-11-23 10:44:58 | ssp done: CanESM5 ssp585 
+2026-11-23 10:44:58 | model done: CanESM5 
+2026-11-23 10:47:08 | ssp done: CNRM-CM6-1 ssp126 
+2026-11-23 10:48:26 | ssp done: CNRM-CM6-1 ssp245 
+2026-11-23 10:49:45 | ssp done: CNRM-CM6-1 ssp370 
+2026-11-23 10:51:24 | ssp done: CNRM-CM6-1 ssp585 
+2026-11-23 10:51:24 | model done: CNRM-CM6-1 
+2026-11-23 10:53:27 | ssp done: EC-Earth3 ssp126 
+2026-11-23 10:54:47 | ssp done: EC-Earth3 ssp245 
+2026-11-23 10:56:10 | ssp done: EC-Earth3 ssp370 
+2026-11-23 10:57:30 | ssp done: EC-Earth3 ssp585 
+2026-11-23 10:57:30 | model done: EC-Earth3 
+2026-11-23 10:59:42 | ssp done: EC-Earth3-Veg-LR ssp126 
+2026-11-23 11:01:04 | ssp done: EC-Earth3-Veg-LR ssp245 
+2026-11-23 11:02:25 | ssp done: EC-Earth3-Veg-LR ssp370 
+2026-11-23 11:03:45 | ssp done: EC-Earth3-Veg-LR ssp585 
+2026-11-23 11:03:45 | model done: EC-Earth3-Veg-LR 
+2026-11-23 11:06:01 | ssp done: FGOALS-g3 ssp126 
+2026-11-23 11:07:19 | ssp done: FGOALS-g3 ssp245 
+2026-11-23 11:08:38 | ssp done: FGOALS-g3 ssp370 
+2026-11-23 11:10:01 | ssp done: FGOALS-g3 ssp585 
+2026-11-23 11:10:01 | model done: FGOALS-g3 
+2026-11-23 11:12:15 | ssp done: GFDL-ESM4 ssp126 
+2026-11-23 11:13:45 | ssp done: GFDL-ESM4 ssp245 
+2026-11-23 11:15:13 | ssp done: GFDL-ESM4 ssp370 
+2026-11-23 11:16:41 | ssp done: GFDL-ESM4 ssp585 
+2026-11-23 11:16:41 | model done: GFDL-ESM4 
+2026-11-23 11:18:50 | ssp done: HadGEM3-GC31-MM ssp126 
+2026-11-23 11:20:16 | ssp done: HadGEM3-GC31-MM ssp585 
+2026-11-23 11:20:16 | model done: HadGEM3-GC31-MM 
+2026-11-23 11:22:25 | ssp done: INM-CM4-8 ssp126 
+2026-11-23 11:23:54 | ssp done: INM-CM4-8 ssp245 
+2026-11-23 11:25:19 | ssp done: INM-CM4-8 ssp370 
+2026-11-23 11:26:50 | ssp done: INM-CM4-8 ssp585 
+2026-11-23 11:26:50 | model done: INM-CM4-8 
+2026-11-23 11:29:02 | ssp done: MIROC-ES2L ssp126 
+2026-11-23 11:30:31 | ssp done: MIROC-ES2L ssp245 
+2026-11-23 11:32:01 | ssp done: MIROC-ES2L ssp370 
+2026-11-23 11:33:34 | ssp done: MIROC-ES2L ssp585 
+2026-11-23 11:33:34 | model done: MIROC-ES2L 
+2026-11-23 11:36:07 | ssp done: MIROC6 ssp126 
+2026-11-23 11:37:35 | ssp done: MIROC6 ssp245 
+2026-11-23 11:39:08 | ssp done: MIROC6 ssp370 
+2026-11-23 11:40:36 | ssp done: MIROC6 ssp585 
+2026-11-23 11:40:36 | model done: MIROC6 
+2026-11-23 11:42:44 | ssp done: MPI-ESM1-2-HR ssp126 
+2026-11-23 11:44:10 | ssp done: MPI-ESM1-2-HR ssp245 
+2026-11-23 11:45:41 | ssp done: MPI-ESM1-2-HR ssp370 
+2026-11-23 11:47:14 | ssp done: MPI-ESM1-2-HR ssp585 
+2026-11-23 11:47:14 | model done: MPI-ESM1-2-HR 
+2026-11-23 11:49:21 | ssp done: NorESM2-MM ssp126 
+2026-11-23 11:50:44 | ssp done: NorESM2-MM ssp245 
+2026-11-23 11:52:09 | ssp done: NorESM2-MM ssp370 
+2026-11-23 11:53:36 | ssp done: NorESM2-MM ssp585 
+2026-11-23 11:53:36 | model done: NorESM2-MM 
+2026-11-23 11:53:59 | QED_50 done: constant tail, 13068 pr series 

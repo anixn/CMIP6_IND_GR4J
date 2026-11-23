@@ -1,373 +1,1265 @@
-% ============================================================
-% paper.tex -- draft manuscript (v0.2, 18 November 2026)
-% Compile with TinyTeX:  tinytex::latexmk("manuscript/paper.tex")
-% Status: objective framed; methods specified; historical leg complete.
-%         Points needing the real literature survey are marked \todo{}.
-% ============================================================
-\documentclass[11pt,a4paper]{article}
-\usepackage[margin=2.3cm]{geometry}
-\usepackage[T1]{fontenc}
-\usepackage[utf8]{inputenc}
-\usepackage{booktabs}
-\usepackage{graphicx}
+% Options for packages loaded elsewhere
+\PassOptionsToPackage{unicode}{hyperref}
+\PassOptionsToPackage{hyphens}{url}
+\PassOptionsToPackage{dvipsnames,svgnames,x11names}{xcolor}
+\documentclass[
+  english,
+  11pt,
+]{article}
 \usepackage{xcolor}
-\usepackage[hidelinks]{hyperref}
+\usepackage[margin=2.3cm]{geometry}
+\usepackage{amsmath,amssymb}
+\setcounter{secnumdepth}{-\maxdimen} % remove section numbering
+\usepackage{iftex}
+\ifPDFTeX
+  \usepackage[T1]{fontenc}
+  \usepackage[utf8]{inputenc}
+  \usepackage{textcomp} % provide euro and other symbols
+\else % if luatex or xetex
+  \usepackage{unicode-math} % this also loads fontspec
+  \defaultfontfeatures{Scale=MatchLowercase}
+  \defaultfontfeatures[\rmfamily]{Ligatures=TeX,Scale=1}
+\fi
+\usepackage{lmodern}
+\ifPDFTeX\else
+  % xetex/luatex font selection
+\fi
+% Use upquote if available, for straight quotes in verbatim environments
+\IfFileExists{upquote.sty}{\usepackage{upquote}}{}
+\IfFileExists{microtype.sty}{% use microtype if available
+  \usepackage[]{microtype}
+  \UseMicrotypeSet[protrusion]{basicmath} % disable protrusion for tt fonts
+}{}
+\makeatletter
+\@ifundefined{KOMAClassName}{% if non-KOMA class
+  \IfFileExists{parskip.sty}{%
+    \usepackage{parskip}
+  }{% else
+    \setlength{\parindent}{0pt}
+    \setlength{\parskip}{6pt plus 2pt minus 1pt}}
+}{% if KOMA class
+  \KOMAoptions{parskip=half}}
+\makeatother
+\usepackage{longtable,booktabs,array}
 \usepackage{caption}
-\usepackage{longtable}
-\usepackage{array}
+\captionsetup[table]{skip=6pt}
+\newcounter{none} % for unnumbered tables
+\usepackage{calc} % for calculating minipage widths
+% Correct order of tables after \paragraph or \subparagraph
+\usepackage{etoolbox}
+\makeatletter
+\patchcmd\longtable{\par}{\if@noskipsec\mbox{}\fi\par}{}{}
+\makeatother
+% definitions for citeproc citations
+\NewDocumentCommand\citeproctext{}{}
+\NewDocumentCommand\citeproc{mm}{%
+  \begingroup\def\citeproctext{#2}\cite{#1}\endgroup}
+\makeatletter
+ % allow citations to break across lines
+ \let\@cite@ofmt\@firstofone
+ % avoid brackets around text for \cite:
+ \def\@biblabel#1{}
+ \def\@cite#1#2{{#1\if@tempswa , #2\fi}}
+\makeatother
+\newlength{\cslhangindent}
+\setlength{\cslhangindent}{1.5em}
+\newlength{\csllabelwidth}
+\setlength{\csllabelwidth}{3em}
+\newenvironment{CSLReferences}[2] % #1 hanging-indent, #2 entry-spacing
+ {\begin{list}{}{%
+  \setlength{\itemindent}{0pt}
+  \setlength{\leftmargin}{0pt}
+  \setlength{\parsep}{0pt}
+  % turn on hanging indent if param 1 is 1
+  \ifodd #1
+   \setlength{\leftmargin}{\cslhangindent}
+   \setlength{\itemindent}{-1\cslhangindent}
+  \fi
+  % set entry spacing
+  \setlength{\itemsep}{#2\baselineskip}}}
+ {\end{list}}
+\usepackage{calc}
+\newcommand{\CSLBlock}[1]{\hfill\break\parbox[t]{\linewidth}{\strut\ignorespaces#1\strut}}
+\newcommand{\CSLLeftMargin}[1]{\parbox[t]{\csllabelwidth}{\strut#1\strut}}
+\newcommand{\CSLRightInline}[1]{\parbox[t]{\linewidth - \csllabelwidth}{\strut#1\strut}}
+\newcommand{\CSLIndent}[1]{\hspace{\cslhangindent}#1}
+\ifLuaTeX
+\usepackage[bidi=basic,shorthands=off]{babel}
+\else
+\usepackage[bidi=default,shorthands=off]{babel}
+\fi
+\ifLuaTeX
+  \usepackage{selnolig} % disable illegal ligatures
+\fi
+\setlength{\emergencystretch}{3em} % prevent overfull lines
+\providecommand{\tightlist}{%
+  \setlength{\itemsep}{0pt}\setlength{\parskip}{0pt}}
+\usepackage{bookmark}
+\IfFileExists{xurl.sty}{\usepackage{xurl}}{} % add URL line breaks if available
+\urlstyle{same}
+% fallback for those not using the hyperref driver hyperxmp:
+\makeatletter
+\@ifundefined{xmpquote}{\newcommand{\xmpquote}[1]{#1}}{}
+\makeatother
+\hypersetup{
+  pdflang={en},
+  colorlinks=true,
+  linkcolor={Maroon},
+  filecolor={Maroon},
+  citecolor={Blue},
+  urlcolor={Blue},
+  pdfcreator={LaTeX via pandoc}}
 
-\newcommand{\todo}[1]{\textcolor{red}{[TODO: #1]}}
-
-\title{\textbf{A two-stage framework for selecting CMIP6 Earth-system models\\
-for catchment-scale low-flow and drought projection over Peninsular India}\\
-\large Empirical quantile mapping onto CAMELS-IND forcings, GR4J/GR6J-based
-hydrological evaluation, and uncertainty decomposition for out-of-sample
-model shortlisting}
-\author{Ankit Deshmukh\thanks{Draft v0.2 -- objective framed 18 November 2026.
-Literature survey pending (Section~\ref{sec:todo}).}}
-\date{18 November 2026}
+\author{}
+\date{}
 
 \begin{document}
-\maketitle
 
-\begin{abstract}
-\noindent Scenario-driven water-availability and drought studies over Indian
-catchments depend on which CMIP6 models feed the hydrological analysis, yet
-model selection is usually arbitrary or inherited from global assessments.
-We develop a reproducible \emph{two-stage, low-flow-aware model-selection
-framework} over the 472 CAMELS-IND catchments. Stage one bias-corrects daily
-CMIP6 precipitation and temperature (1981--2014, 22 all-variable models) onto
-catchment-mean forcings with seasonal empirical quantile mapping, and ranks
-models on \emph{out-of-sample} forcing skill (fit 1981--2000, score
-2001--2014). Stage two drives a lumped hydrological model (GR4J, calibrated
-per catchment on observed discharge; calibration median KGE 0.80,
-out-of-sample median 0.54 across 192 catchments) with each bias-corrected
-series and ranks models by how realistically simulated \emph{discharge}
-matches observed flows. The pilot finding that forcing-skill and
-discharge-skill ranks diverge (Spearman $\rho=0.14$) motivates the central
-hypothesis: model selection for drought projection must be low-flow-aware.
-We specify the extension to a five-metric low-flow layer, a GR4J--GR6J
-structural-uncertainty axis, a drought-propagation-time selection test, a
-GCM $\times$ structure $\times$ bias-correction variance decomposition, and a
-process-based low-flow audit of the CAMELS-IND-Proj LSTM projections. A
-hybrid shortlist of 14 models spanning the CMIP6 ECS range
-($\approx$1.8--5.7\,K) is fixed for projections under the four SSPs of the
-AR6 core scenario matrix (ssp126, ssp245, ssp370, ssp585).
-\todo{rewrite abstract with H1--H5 verdict numbers once analyses land}
-\end{abstract}
+\section{A two-stage framework for selecting CMIP6 Earth-system models
+for catchment-scale low-flow and drought projection over Peninsular
+India}\label{a-two-stage-framework-for-selecting-cmip6-earth-system-models-for-catchment-scale-low-flow-and-drought-projection-over-peninsular-india}
 
-\section{Objective framing}
-\label{sec:objective}
+\emph{Empirical quantile mapping onto CAMELS-IND forcings,
+GR4J/GR6J-based hydrological evaluation, and uncertainty decomposition
+for out-of-sample model shortlisting}
 
-\textbf{Primary objective.} Determine \emph{which CMIP6 models are fit for
-low-flow and drought projection over Peninsular India --- and how much that
-answer depends on the hydrological model structure and the bias-correction
-design} --- through an out-of-sample, hydrologically-evaluated selection
-framework, and deliver the resulting projection engine as the core of a
-national low-flow/drought programme.
+\textbf{Ankit Deshmukh} --- draft v0.6, 23 November 2026 (v0.2 18 Nov,
+v0.3--0.4 18 Nov, v0.5 21 Nov)
 
-Sub-objectives, each with a pre-registered decision rule (negative results
-are reported as results):
+\begin{quote}
+\textbf{Status: O1--O5 all executed with verdicts (§5.1--5.5); H4
+executed 23 Nov 2026 (\texttt{data\_processed/decomp/h4\_verdict.md}, H4
+STANDS).} Novelty framing and the H4 ANOVA specification are governed by
+\texttt{manuscript/NOVELTY\_AND\_ANOVA\_SPEC.md} (v2, 23 Nov 2026).
+Points needing the full literature survey are marked \textbf{{[}TODO:
+survey{]}}.
+\end{quote}
 
-\begin{table}[h]
-\centering\small
-\caption{Objectives, hypotheses and decision rules.}
-\begin{tabular}{p{0.4cm}p{4.6cm}p{2.6cm}p{7.2cm}}
-\toprule
-\# & Objective & Hypothesis & Decision rule \\
-\midrule
-O1 & Low-flow metric layer: rank models on low-flow skill; test divergence
-from forcing skill & H1 forcing rank $\neq$ low-flow rank & Fails if pooled
-Spearman $\rho>0.6$ $\rightarrow$ framework collapses to one stage \\
-O2 & GR6J structural axis: GR4J--GR6J divergence stratified by
-aridity/storage & H2 structures differ materially & Fails if
-indistinguishable across catchment types \\
-O3 & Drought-propagation selection (SPI-12$\rightarrow$SRI-12 lag,
-pre-registered band) & H3 mean-flow selection misses propagation skill &
-Fails if all 22 models reproduce observed propagation within band \\
-O4 & Uncertainty decomposition: GCM $\times$ structure $\times$ EQM tail
-policy on low-flow projection variance & H4 GCM dominates; structure
-$\geq$5\% matters & Fails if structure share $<$5\% everywhere (publishable
-negative result) \\
+\begin{center}\rule{0.5\linewidth}{0.5pt}\end{center}
+
+\subsection{Abstract}\label{abstract}
+
+Scenario-driven water-availability and drought studies over Indian
+catchments depend on which CMIP6 models feed the hydrological analysis,
+yet model selection is usually arbitrary or inherited from global
+assessments. We present the \textbf{first low-flow-aware CMIP6
+model-selection framework for Peninsular India at the 472-catchment
+scale} (CAMELS-IND universe), combining a formal forcing-vs-low-flow
+rank-divergence test, a GR4J/GR6J structural-uncertainty axis,
+drought-propagation reproduction as a selection dimension, and a
+three-factor variance decomposition (GCM × structure × bias-correction
+tail policy) that treats tail design as an explicit uncertainty source
+--- a combination novelty: the ANOVA machinery, the low-flow metrics and
+the SPI/SRI index are borrowed, the axes, the selection logic and the
+application are new. \textbf{Stage one} bias-corrects daily CMIP6
+precipitation and temperature (1981--2014, 22 all-variable models) onto
+catchment-mean forcings with seasonal empirical quantile mapping (EQM)
+and ranks models on \emph{out-of-sample} forcing skill (fit 1981--2000,
+score 2001--2014). \textbf{Stage two} drives calibrated GR4J and GR6J
+(192 catchments calibrated under both structures; calibration median KGE
+0.80, out-of-sample 0.54) with each bias-corrected series and evaluates
+low-flow realism. The executed results: \textbf{(H1)} forcing-skill and
+low-flow-skill ranks are essentially orthogonal (Spearman ρ = −0.027,
+95\% CI {[}−0.095, 0.038{]}) --- one-stage forcing selection cannot
+stand in for low-flow selection; \textbf{(H2)} GR4J and GR6J diverge
+materially and low-flow-specifically at observed forcings (dry-tercile
+7-day-minimum divergence −449 pp); \textbf{(H3)} all 22 models reproduce
+the observed SPI-12→SRI-12 propagation lag (propagation share
+0.91--0.96), so mean-flow selection does not find propagation skill (ρ =
+−0.350); \textbf{(H5)} the CAMELS-IND-Proj LSTM benchmark wins low-flow
+\emph{magnitudes} (win shares 0.71--0.95) but loses drought
+\emph{duration} (0.39) --- its dry tail is not uniformly superior.
+\textbf{(H4)} the GCM × structure × tail-policy decomposition of
+projected low-flow variance (192 catchments, 4 SSPs, 3 future windows,
+11,520 saturated-design cells) shows hydrological model structure is
+non-negligible in \textbf{149 of 180} summary cells --- it is the
+\emph{largest} single uncertainty source for extreme low flows in dry
+catchments (66--68\% of variance for Q95 and 7-day minima, versus
+\textasciitilde23\% for GCM choice), GCM dominates whole-flow variance
+(95--96\%), and the EQM tail policy is a negligible source (≤ 0.5\%) ---
+the variance-level confirmation that mean-flow-based selection cannot
+arbitrate low-flow projection uncertainty.
+
+\subsection{1. Objective framing}\label{objective-framing}
+
+\textbf{Headline claim (spec v2 §1 --- use verbatim or near-verbatim;
+the rest of the paper is supporting evidence for this sentence):}
+
+\begin{quote}
+We present the first low-flow-aware CMIP6 model-selection framework for
+Peninsular India at the 472-catchment scale, combining a formal
+forcing-vs-low-flow rank-divergence test, a GR4J/GR6J
+structural-uncertainty axis, drought-propagation reproduction as a
+selection dimension, and a three-factor variance decomposition (GCM ×
+structure × bias-correction tail policy) that treats tail design as an
+explicit uncertainty source.
+\end{quote}
+
+\textbf{Primary objective.} Determine \emph{which CMIP6 models are fit
+for low-flow and drought projection over Peninsular India --- and how
+much that answer depends on the hydrological model structure and the
+bias-correction design} --- through an out-of-sample,
+hydrologically-evaluated selection framework, and deliver the resulting
+projection engine as the core of a national low-flow/drought programme.
+
+\textbf{Scale honesty (roster numbers are exact and never
+interchangeable --- full table in \texttt{NOVELTY\_AND\_ANOVA\_SPEC.md}
+§2).} ``472-catchment scale'' names the framework's setting (the
+CAMELS-IND / CAMELS-IND-Proj universe). The decomposition itself runs on
+the \textbf{192} catchments calibrated under both structures (64/64/64
+aridity terciles), the H1 composite on \textbf{78} non-ephemeral
+catchments, the H2 base case on \textbf{172} paired catchments, and the
+frozen propagation lags number \textbf{167}. ``472'' never attaches to
+an ANOVA, divergence or correlation sentence; each roster number is
+stated exactly where it first appears.
+
+\textbf{Sub-objectives (each with a pre-registered decision rule;
+negative results are reported as results):}
+
+{\def\LTcaptype{none} % do not increment counter
+\begin{longtable}[]{@{}
+  >{\raggedright\arraybackslash}p{(\linewidth - 6\tabcolsep) * \real{0.2500}}
+  >{\raggedright\arraybackslash}p{(\linewidth - 6\tabcolsep) * \real{0.2500}}
+  >{\raggedright\arraybackslash}p{(\linewidth - 6\tabcolsep) * \real{0.2500}}
+  >{\raggedright\arraybackslash}p{(\linewidth - 6\tabcolsep) * \real{0.2500}}@{}}
+\toprule\noalign{}
+\begin{minipage}[b]{\linewidth}\raggedright
+\#
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Objective
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Hypothesis
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Decision rule
+\end{minipage} \\
+\midrule\noalign{}
+\endhead
+\bottomrule\noalign{}
+\endlastfoot
+O1 & Low-flow metric layer: rank models on low-flow skill (logNSE, Q95
+bias, low-flow volume bias, dry-spell bias, 7-day min bias), test
+divergence from forcing skill & \textbf{H1} forcing rank ≠ low-flow rank
+& Fails if pooled Spearman ρ \textgreater{} 0.6 → framework collapses to
+one stage \\
+O2 & GR6J structural axis: quantify GR4J--GR6J divergence in low-flow
+projections, stratified by aridity/baseflow storage & \textbf{H2}
+structures differ materially & Fails if indistinguishable across
+catchment types \\
+O3 & Drought-propagation selection: SPI-12 → SRI-12 propagation time as
+a selection criterion (pre-registered tolerance band) & \textbf{H3}
+mean-flow selection misses propagation skill & Fails if all 22 models
+reproduce observed propagation within band \\
+O4 & Uncertainty decomposition: ANOVA of GCM × structure × EQM tail
+policy on low-flow projection variance & \textbf{H4} GCM dominates,
+structure ≥ 5\% matters & Fails if structure share \textless{} 5\%
+everywhere (still a publishable negative result) \\
 O5 & C21 benchmark: audit CAMELS-IND-Proj LSTM projections against
-GR4J/GR6J low-flow skill & H5 LSTM does not uniformly win at low flows &
-If LSTM dominates everywhere, publish as benchmark confirmation \\
-\bottomrule
-\end{tabular}
-\end{table}
+GR4J/GR6J low-flow skill & \textbf{H5} LSTM does not uniformly win at
+low flows & If LSTM dominates everywhere, publish as benchmark
+confirmation, framed as such from the outset \\
+\end{longtable}
+}
 
 \textbf{Two-track design (fixed 18 Nov 2026).} \emph{Track A (substrate,
-ours):} own QED-corrected CMIP6 series (14 hybrid-shortlisted GCMs
-$\times$ 4 SSPs) $\rightarrow$ GR4J/GR6J $\rightarrow$ low-flow projections.
-\emph{Track B (benchmark, theirs):} CAMELS-IND-Proj is used \emph{only} as
-the audited object of O5/H5 --- never as substrate, never as input to our
-models. Rationale: their forcings inherit the coarse-scale Mishra et
-al.~(2020) bias correction (no catchment tuning, no tail-policy axis ---
-using them would kill O4), and analysis-only papers of another group's
-product compete with the producers on their home turf. Method-level
+ours):} own QED-corrected CMIP6 series (14 hybrid-shortlisted GCMs × 4
+SSPs) → GR4J/GR6J → low-flow projections. \emph{Track B (benchmark,
+theirs):} CAMELS-IND-Proj is used \textbf{only} as the audited object of
+O5/H5 --- never as substrate, never as input to our models. Rationale:
+their forcings inherit the coarse-scale Mishra et al.~(2020)
+(\citeproc{ref-mishra2020biascorrected}{Mishra et al. 2020}) bias
+correction (no catchment tuning, no tail-policy axis --- using them
+would kill O4), and analysis-only papers of another group's product
+compete with the producers on their home turf. Method-level
 contributions survive scooping; data-application papers do not.
 
-\section{Prior-art positioning}
-\label{sec:priorart}
+\textbf{Combination novelty (spec v2 §1).} The novelty is a
+\emph{combination} --- low-flow lens + GR4J/GR6J axis + propagation
+selection + three-factor decomposition --- and is stated as such so no
+reviewer reads the paper as claiming a new method: the ANOVA (Park et
+al.~2025 (\citeproc{ref-park2025jhrs}{Park et al. 2025}); Kim \& Chung
+2026 (\citeproc{ref-kimchung2026hess}{Kim and Chung 2026}); Senatore et
+al.~2022 (\citeproc{ref-senatore2022med}{{Senatore et al.} 2022})), the
+low-flow metrics and the SPI/SRI index are borrowed; the axes, the
+selection logic and the application are new (§2 concedes this in the
+same table).
 
-\begin{table}[h]
-\centering\small
-\caption{Adjacent groups and the surviving novelty lane.}
-\begin{tabular}{p{4.6cm}p{4.4cm}p{7.2cm}}
-\toprule
-Group / product & What they own & Why our lane survives \\
-\midrule
-India Drought Monitor + Drought Atlas of India (Chuphal et al.~2024, Sci.\
-Data; IITGN); bias-corrected CMIP6 South Asia (Mishra et al.~2020, Sci.\
-Data) & Meteorological/agricultural drought monitoring at 0.05$^\circ$
-(1901--2020); coarse-scale bias-corrected CMIP6 & No streamflow drought at
-catchment scale; bias correction not catchment-tuned, not seasonally
-stratified, not hydrologically evaluated, not out-of-sample ranked \\
-CAMELS-IND (Mangukiya et al.~2025, ESSD) + CAMELS-IND-Proj (Singh et
-al.~2026, Zenodo 21775597) + MARRMoT adequacy benchmark (Mangukiya et
-al.~2026, WRR) & Datasets; regional LSTM projections (13 GCMs $\times$ 4
-SSPs); model-adequacy benchmarking & No low-flow-aware analysis of their own
-product yet; LSTM dry tail unaudited; we are the first critical
-process-based user. GR4J is in their 5-model sufficient set --- independent
-support for our structural choice \\
-Sharma, Barbhuiya \& Gupta 2026 (Hydrol.\ Process.\ 40(3) e70476; IIT
-Mandi) --- closest prior art & India-wide future streamflow; 4 structures
-(MILC/GR4J/HBV/HYMOD); 12 GCMs; 128 basins & No GR6J, no low-flow-specific
-selection, no forcing-vs-low-flow divergence test, no propagation-time
-selection, no uncertainty decomposition \\
-India Drought Atlas operational ecosystem & Monitoring infrastructure with
-institutional appetite & Our streamflow-drought layer is a candidate
-addition to that ecosystem, not a competitor to it \\
+\subsection{2. Prior-art positioning}\label{prior-art-positioning}
+
+{\def\LTcaptype{none} % do not increment counter
+\begin{longtable}[]{@{}
+  >{\raggedright\arraybackslash}p{(\linewidth - 4\tabcolsep) * \real{0.3333}}
+  >{\raggedright\arraybackslash}p{(\linewidth - 4\tabcolsep) * \real{0.3333}}
+  >{\raggedright\arraybackslash}p{(\linewidth - 4\tabcolsep) * \real{0.3333}}@{}}
+\toprule\noalign{}
+\begin{minipage}[b]{\linewidth}\raggedright
+Group / product
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+What they own
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Why our lane survives
+\end{minipage} \\
+\midrule\noalign{}
+\endhead
+\bottomrule\noalign{}
+\endlastfoot
+\textbf{Sharma, Barbhuiya \& Gupta 2026
+(\citeproc{ref-sharma2026hp}{Sharma et al. 2026})} (\emph{Hydrol.
+Process.} 40(3) e70476; IIT Mandi) --- \textbf{closest prior art} &
+India-wide future streamflow; 4 structures (MILC/GR4J/HBV/HYMOD); 12
+GCMs; 128 basins & No GR6J, no low-flow-specific selection, no
+forcing-vs-low-flow divergence test, no propagation-time selection, no
+uncertainty decomposition. They note ``uncertainty existed for low flow
+events'' but do not formalise it --- we do \\
+\textbf{Park, Kim, Sung \& Chung 2025 (\citeproc{ref-park2025jhrs}{Park
+et al. 2025})} (\emph{J. Hydrol.: Reg. Stud.} 62:102991,
+doi:10.1016/j.ejrh.2025.102991) & ANOVA of uncertainty contributions to
+hydrologic drought projection, South Korea & \textbf{Method borrowed ---
+conceded here and in §4.2}; Korea not India; no GR4J/GR6J axis; no
+tail-policy factor. \emph{(exact factor list verified at
+camera-ready)} \\
+\textbf{NA} (\emph{HESS} 30:227--247, doi:10.5194/hess-30-227-2026) &
+ANOVA of GCM × SSP × calibration-condition × calibration-length for
+future drought, South Korea (SWAT, SDI, 20 CMIP6 GCMs; GCM
+\textgreater{} 60\% for runoff; calibration-related 3.9--9.8\%) &
+\textbf{Method borrowed; single structure (SWAT) so no structural axis;
+no bias-correction factor.} Cited in §2 \emph{and} §4.2 --- HESS is a
+target journal and its reviewers will know this paper \\
+NA (Mediterranean ANOVA of GCM + bias correction) \emph{(full citation
+verified at camera-ready)} & ANOVA with bias-correction method as a
+factor & Method borrowed; not India, no GR4J/GR6J axis, not
+catchment-scale 192 --- which is why P4's claim says \textbf{``tail
+design''}, never ``bias correction'' generically \\
+\textbf{Cannon, Sobie \& Murdock 2015
+(\citeproc{ref-cannon2015qm}{Cannon et al. 2015})} (\emph{J. Climate}
+28(17):6938--6959, doi:10.1175/JCLI-D-14-00754.1) + \textbf{Themeßl,
+Gobiet \& Heinrich 2012 (\citeproc{ref-themessl2012ecc}{Themeßl et al.
+2012})} (\emph{Climatic Change} 112(2):449--468) &
+Quantile-mapping/error-correction choices materially alter extremes and
+the climate-change signal & Not competitors --- the
+\textbf{methodological anchors for the \texttt{tail\_policy} factor}
+(cited in §4.2/§4.3). The 23 Nov EQM defect (a drizzle-interval slope
+turning 60 mm/d into 4.0×10⁹ mm/d pre-fix) is a concrete instance of
+exactly the failure class Cannon documents \\
+Liu et al.~2025 (\citeproc{ref-liu2025atmosphere}{{Liu et al.} 2025})
+(\emph{Atmosphere} 16(6):691, doi:10.3390/atmos16060691 --- journal
+corrected 23 Nov 2026, previously mis-cited as ``Climate'') & CMIP6
+selection + streamflow + hydrological drought (SWAT+MODFOOD) &
+Single-basin scale; no 192-catchment out-of-sample rank; no
+rank-divergence test. \emph{(complete author list at camera-ready)} \\
+\textbf{India Drought Monitor + Drought Atlas of India} (Chuphal et
+al.~2024 (\citeproc{ref-chuphal2024droughtatlas}{Chuphal et al. 2024}),
+\emph{Sci. Data}; IITGN) + bias-corrected CMIP6 South Asia (Mishra et
+al.~2020 (\citeproc{ref-mishra2020biascorrected}{Mishra et al. 2020}),
+\emph{Sci. Data}) & Meteorological/agricultural drought monitoring at
+0.05° (1901--2020); coarse-scale bias-corrected CMIP6 & No streamflow
+drought at catchment scale; bias correction not catchment-tuned, not
+seasonally stratified, not hydrologically evaluated, not out-of-sample
+ranked \\
+\textbf{CAMELS-IND} (Mangukiya et al.~2025
+(\citeproc{ref-mangukiya2025camelsind}{{Mangukiya et al.} 2025}), ESSD)
++ \textbf{CAMELS-IND-Proj} (Singh et al.~2026
+(\citeproc{ref-singh2026camelsindproj}{Singh et al. 2026}), Zenodo
+21775597) + MARRMoT adequacy benchmark (Mangukiya et al.~2026
+(\citeproc{ref-mangukiya2026wrr}{{Mangukiya et al.} 2026}), WRR) &
+Datasets; regional LSTM projections (13 GCMs × 4 SSPs); model-adequacy
+benchmarking & No low-flow-aware analysis of their own product yet; LSTM
+dry tail unaudited; we are the first critical process-based user. GR4J
+is in their 5-model sufficient set (WRR 2026) --- independent support
+for our structural choice, cited as an ally, not a competitor \\
+\textbf{India Drought Atlas operational ecosystem} (IITGN) & Monitoring
+infrastructure with institutional appetite & Our streamflow-drought
+layer is a candidate addition to that ecosystem (roadmap Phase 5), not a
+competitor to it \\
 Tiwary \& Mondal 2026 (EGU abstract) & Historical Q7min trends, 55
-minimally-regulated catchments & Historical description; ours is projections
-+ selection + uncertainty \\
-\bottomrule
-\end{tabular}
-\end{table}
+minimally-regulated catchments & Historical description; ours is
+projections + selection + uncertainty \\
+Meresa et al.~2023; Wang et al.~2025 \emph{(full citations verified at
+camera-ready)} & CMIP6 drought propagation (Ireland; other) &
+Propagation analysis exists elsewhere; the \textbf{selection use} over
+Indian catchments is new (§4.2 states the index is borrowed) \\
+\end{longtable}
+}
 
-\section{Data}
-\label{sec:data}
+\textbf{Conceded machinery (state once here, do not hide):} seasonal
+EQM, the low-flow metric suite (logNSE, Q95/mam7/volume/dry-spell
+biases), the SPI/SRI construction and the cross-correlation lag, and
+multi-way ANOVA variance decomposition are all standard or borrowed (NA;
+NA; NA). What is claimed as new is stated in §1: the axes, the selection
+logic, and the application.
+
+\subsection{3. Data}\label{data}
 
 \begin{itemize}
-\item \textbf{CAMELS-IND} (Mangukiya et al.~2025, ESSD 17:461; Zenodo
-14999580): daily catchment-mean forcings (pr, tasmax, tasmin), observed
-streamflow, 211 attributes, 472 catchments, 1981--2014 (12,418 days;
-forcings complete). Area (\texttt{cwc\_area}, km$^2$) and latitude
-(\texttt{cwc\_lat}) from the topography file.
-\item \textbf{CMIP6 historical}: daily \texttt{pr}/\texttt{tasmax}/
-\texttt{tasmin}, 24 models over the Indian domain; CESM2 and IITM-ESM
-precipitation-only $\rightarrow$ excluded; 22 all-variable models form the
-selection pool. HadGEM3-GC31-MM 360-day calendar handled (invalid Feb
-29/30 $\rightarrow$ NA). Single members.
-\item \textbf{CMIP6 scenarios (Track A)}: hybrid-shortlisted 14 models
-$\times$ \textbf{4 SSPs (ssp126, ssp245, ssp370, ssp585)} $\times$ near
-(2015--2040), mid (2041--2060), long (2081--2100). ssp370 added 18 Nov 2026
-to complete the AR6 core scenario matrix and align with CAMELS-IND-Proj's
-4-SSP design.
-\item \textbf{CAMELS-IND-Proj} (Singh et al.~2026, Zenodo 21775597, CC BY
-4.0; EcoHydro Lab IIT Roorkee): daily LSTM streamflow 2015--2100, 13 GCMs
-$\times$ 4 SSPs, historical-per-GCM runs and forcings; $\sim$11.3\,GB.
-\textbf{Track B only.} Confidence flags exist for a subset of catchments
-(239 per the project brief) --- \emph{unverified on the public record};
-the number and flag semantics must be verified against the downloaded files
-before any use. \todo{survey}
+\tightlist
+\item
+  \textbf{CAMELS-IND} (NA, ESSD 17:461; Zenodo 14999580): daily
+  catchment-mean forcings (pr, tasmax, tasmin), observed streamflow, 211
+  attributes, 472 catchments, 1981--2014 (12,418 days; forcings
+  complete). Area (\texttt{cwc\_area}, km²) and latitude
+  (\texttt{cwc\_lat}) from the topography file.
+\item
+  \textbf{CMIP6 historical}: daily \texttt{pr}, \texttt{tasmax},
+  \texttt{tasmin}, 24 models over the Indian domain; CESM2 and IITM-ESM
+  precipitation-only → excluded; \textbf{22 all-variable models} form
+  the selection pool. HadGEM3-GC31-MM 360-day calendar handled (invalid
+  Feb 29/30 → NA). Single members (\texttt{r1i1p1f1} or nearest).
+\item
+  \textbf{CMIP6 scenarios (Track A)}: the hybrid-shortlisted \textbf{14
+  models × 4 SSPs (ssp126, ssp245, ssp370, ssp585)} × near (2015--2040),
+  mid (2041--2060), long (2081--2100) windows. ssp370 added 18 Nov 2026
+  to complete the AR6 core scenario matrix and align with
+  CAMELS-IND-Proj's 4-SSP design.
+\item
+  \textbf{Scenario acquisition and QC}: 11,088 daily files expected (14
+  models × 4 SSPs × 3 variables × 66 window years; 2061--2080 never
+  downloaded, by design). Acquisition is variable-major into
+  \texttt{Download\_CMIP/SSP/\{pr,tasmax,tasmin\}/} (20 Nov 2026). Two
+  acquisition facts are recorded here because they are data-quality
+  facts, not logistics. (i) Several ESGF THREDDS nodes intermittently
+  returned a Java stack trace (\texttt{StorageExceptionNotActive}) as
+  the HTTP body, which the R client wrote to disk as
+  \texttt{\textless{}name\textgreater{}.nc}; every file is therefore
+  validated by \textbf{magic bytes} (\texttt{\textbackslash{}x89HDF} for
+  netCDF-4/HDF5, \texttt{CDF\textbackslash{}x01} for netCDF-3) before
+  use, and non-netCDF files are excluded with reason
+  \texttt{not\_netcdf\_error\_page}. The 21 Nov scan of the full archive
+  found \textbf{0} remaining, i.e.~the re-fetches succeeded. (ii) The
+  archive also holds two models dropped from the hybrid shortlist
+  (\texttt{GISS-E2-1-G}, \texttt{INM-CM5-0}; 831 files), logged and
+  ignored. A model × SSP × variable combo enters the pipeline only when
+  all 66 years are present (§4.3).
+\item
+  \textbf{CAMELS-IND-Proj} (NA, Zenodo 21775597, CC BY 4.0; EcoHydro Lab
+  IIT Roorkee): daily LSTM streamflow 2015--2100, 13 GCMs × 4 SSPs,
+  historical-per-GCM runs and forcings included; \textasciitilde11.3 GB;
+  \texttt{filter\_catchment\_model\_scenario.py} for subsetting.
+  \textbf{Track B only.} The project brief's confidence-flag construct
+  was checked against the distributed archive and is \textbf{not present
+  in the data} (no flag/mask file; aggregate header is exactly
+  year/month/day + 472 gauge columns --- §5.4); the paper therefore does
+  not use it. \textbf{{[}TODO: survey{]}}
 \end{itemize}
 
-\section{Methods}
-\label{sec:methods}
+\subsection{4. Methods}\label{methods}
 
-\subsection{Historical leg (complete)}
-Tiering by forcing availability (Tier~1 $\geq$70\%, 180; Tier~2 $\geq$30\%,
-62; Tier~3 excluded, 230 --- all logged); area-weighted catchment-mean
-aggregation; seasonal EQM (DJF/MAM/JJA/SON, bins $\geq$300 days with annual
-fallback --- 331 of 15,972 fits; tie-collapsed CDF; tail policies
-pr=constant / T=linear for historical evaluation; every value flagged and
-flags counted); out-of-sample forcing ranking (fit 1981--2000, score
-2001--2014; KGE/NSE/PBIAS composite; natural break after rank 14);
-GR4J leg (airGR; Oudin PET;
-$Q[\mathrm{mm\,d^{-1}}] = Q[\mathrm{m^3\,s^{-1}}]\times 86.4/A[\mathrm{km^2}]$;
-warm-up 1981; calibrate 1982--2000, Michel local search on $1-$KGE; validate
-out-of-sample 2001--2014 with manual PBIAS; $<$3,650 valid Q-days $\rightarrow$
-skip and log); CMIP-driven discharge evaluation of all 22 corrected series
-against observed 2001--2014 discharge. Leap-day gaps of 365-day-calendar
-models filled conservatively (pr$\rightarrow$0, T$\rightarrow$interpolated),
-counted in \texttt{n\_gap\_filled}. \todo{cite Perrin 2003; Coron 2017;
-Oudin 2005; Michel 1991; full survey pending}
+\subsubsection{4.1 Historical leg
+(complete)}\label{historical-leg-complete}
 
-\subsection{Phase methods (specified; to be executed)}
+\begin{enumerate}
+\def\labelenumi{\arabic{enumi}.}
+\tightlist
+\item
+  \textbf{Tiering} by forcing availability (1981--2014): Tier 1 ≥70\%
+  (180), Tier 2 ≥30\% (62), Tier 3 excluded (230) --- all logged.
+\item
+  \textbf{Aggregation}: area-weighted catchment means per model ×
+  variable (66 series per model).
+\item
+  \textbf{Seasonal EQM}: per variable × season (DJF/MAM/JJA/SON) ×
+  catchment; bins ≥300 days with annual fallback (331 of 15,972 fits);
+  tie-collapsed CDF; tail policies pr=constant / T=linear for the
+  historical evaluation; every value flagged (\texttt{within\_range} vs
+  extrapolation), flags counted never hidden.
+\item
+  \textbf{Out-of-sample forcing ranking}: EQM fit 1981--2000 → score
+  2001--2014 → KGE/NSE/PBIAS composite rank sum; natural break after
+  rank 14 (non-overlapping out-of-sample KGE for every variable).
+\item
+  \textbf{GR4J hydrological leg}: airGR; Oudin PET; Q{[}mm/d{]} =
+  Q{[}m³/s{]}×86.4/A{[}km²{]}; warm-up 1981; calibrate 1982--2000
+  (Michel local search on 1−KGE); validate out-of-sample 2001--2014
+  (KGE/NSE/PBIAS, PBIAS manual); \textless3,650 valid Q-days → skip and
+  log. 192 of 242 calibrated.
+\item
+  \textbf{CMIP-driven discharge evaluation}: calibrated parameters
+  driven with all 22 corrected series; scored on observed 2001--2014
+  discharge; per-catchment ranks → composite discharge ranking. Leap-day
+  gaps of 365-day-calendar models filled conservatively (pr→0,
+  T→interpolated), counted in \texttt{n\_gap\_filled}.
+\end{enumerate}
+
+\subsubsection{4.2 Phase methods (O1, O2, O3, O5 executed --- verdicts
+in §5.1--5.4; O4 pending,
+§4.3)}\label{phase-methods-o1-o2-o3-o5-executed-verdicts-in-5.15.4-o4-pending-4.3}
+
 \begin{itemize}
-\item \textbf{Low-flow metric layer (O1)}: logNSE, Q95 bias, low-flow volume
-bias (below observed Q90), dry-spell bias, mean annual 7-day minimum bias ---
-2001--2014 only; composite rank after pairwise $\rho>0.9$ de-duplication.
-\item \textbf{GR6J axis (O2)}: GR6J (6 parameters) via airGR, identical
-inputs/windows/warm-up/optimizer as GR4J, calibrated on the same 192
-catchments; divergence \texttt{div = (GR6J$-$GR4J)/GR4J} per model
-$\times$ catchment $\times$ SSP $\times$ metric; stratified by aridity and
-baseflow-index proxy; ANOVA-style structure test.
-\item \textbf{Propagation (O3)}: SPI-12/SRI-12 (gamma fit, fixed convention);
-propagation time = SPI--SRI cross-correlation lag (0--12 months) ---
-\emph{never} inferred from SPI$\approx$SRI near-identity; pre-registered
-tolerance band on observed propagation \emph{before} any model comparison;
-propagation rate = share of SPI$\leq-1$ months followed by SRI$\leq-1$ within
-the window.
-\item \textbf{Decomposition (O4)}: multi-way ANOVA / variance components of
-Q95 change, 7-day min change, low-flow volume change $\sim$ GCM $\times$
-structure $\times$ tail policy, blocking by catchment type; bootstrap CIs
-($\geq$1000 resamples, recorded seed); responses never blended.
-\item \textbf{Benchmark (O5)}: same low-flow metric suite applied to
-CAMELS-IND-Proj historical-per-GCM runs (skill) and 2015--2100 projections
-(projected change); distributions and per-catchment win rates, stratified by
-confidence flag and aridity; the LSTM product is benchmarked, never
-regenerated.
+\tightlist
+\item
+  \textbf{Low-flow metric layer (O1)}: logNSE, Q95 bias, low-flow volume
+  bias (below observed Q90), dry-spell bias, mean annual 7-day minimum
+  bias --- computed 2001--2014 only; composite rank after pairwise
+  ρ\textgreater0.9 de-duplication.
+\item
+  \textbf{GR6J axis (O2)}: GR6J (6 parameters) via airGR, identical
+  inputs/windows/warm-up/optimizer as GR4J, calibrated on the same
+  catchments; divergence \texttt{div\ =\ GR6J\ −\ GR4J} (difference for
+  logNSE; percentage points for the \% bias metrics --- not divided by
+  GR4J, which would explode near zero biases; documented deviation,
+  pre-registered in \texttt{GR6J\_00\_setup.Rmd}); stratified by aridity
+  tercile (annual PET/P); materiality thresholds pre-registered (logNSE
+  ≥ 0.10 or ≥ 10 pp); direction reported, never claimed as superiority.
+\item
+  \textbf{Propagation (O3)}: SPI-12/SRI-12 (gamma-MLE + normal-quantile
+  transform, identical convention both sides --- \textbf{the index is
+  borrowed; the selection use is the contribution}); propagation time
+  \textbf{defined exclusively} as the SPI--SRI cross-correlation lag
+  (0--12 months, ties → smallest) --- \textbf{never} inferred from
+  SPI≈SRI near-identity (the Machhar-type artefact; mean
+  \textbar SRI−SPI\textbar{} computed as diagnostic only); tolerance
+  band \texttt{\textbar{}L\_model\ −\ L\_obs\textbar{}\ ≤\ 1\ month} and
+  the falsification rule (all models ≥ 80\% reproduced AND spread
+  \textless{} 0.10 AND ρ(forcing rank, prop\_share) \textgreater{} 0.6)
+  pre-registered in \texttt{PROP\_PRE\_REGISTRATION.md} (18 Nov 2026)
+  \textbf{before} any model SRI was computed; observed lags frozen (167
+  catchments).
+\item
+  \textbf{Decomposition (O4 --- methods frozen 23 Nov 2026, spec
+  \texttt{NOVELTY\_AND\_ANOVA\_SPEC.md} §5):}
+
+  \begin{enumerate}
+  \def\labelenumi{\arabic{enumi}.}
+  \tightlist
+  \item
+    \textbf{Full factorial design}
+    \texttt{value\ \textasciitilde{}\ gcm\ ×\ structure\ ×\ tail\_policy},
+    balanced within every cell; \textbf{11,520 cells} (192 catchments ×
+    5 indicators × 4 SSPs × 3 windows); GCM coverage
+    \textbf{14/13/13/14} (HadGEM3-GC31-MM has no published ssp245/ssp370
+    --- logged, never padded).
+  \item
+    \textbf{Saturation statement.} 56 (52) observations per cell equal
+    the full parameter count, so the design has \textbf{no residual df}:
+    the per-cell analysis is an \textbf{exact variance partition, not a
+    significance test} --- no F, no p, no per-cell CI from the ANOVA.
+    Inference rests on the pre-registered rule and the catchment
+    bootstrap, not per-cell F-tests. The arithmetic is verified on the
+    real input table before any fit (\texttt{DECOMP\_00}, saturation
+    check).
+  \item
+    \textbf{Variance shares} = SS\_term / SS\_total over the
+    \textbf{seven} terms (3 main effects, three 2-way, and the 3-way
+    interaction, always reported) --- classical η² in this balanced
+    design; η²p is identically 1 and ω² undefined under saturation, so
+    neither is computed.
+  \item
+    \textbf{Tail-policy levels, precisely.} \texttt{linear} = per-tail
+    linear extension beyond the training CDF range (per-tail applier for
+    pr, corrected 23 Nov 2026, \texttt{QED\_50} §0b); \texttt{constant}
+    = clamp at the reference tail. Anchored with Cannon et al.~(2015)
+    (\citeproc{ref-cannon2015qm}{Cannon et al. 2015}) and Themeßl et
+    al.~(2012) (\citeproc{ref-themessl2012ecc}{Themeßl et al. 2012});
+    one factual sentence on the 23 Nov defect (a drizzle-interval slope
+    turned 60 mm/d into 4.0×10⁹ mm/d before the fix) as evidence that
+    tail design is consequential --- the fix preceded any H4 result, and
+    the historical leg used \texttt{constant} for precipitation, so
+    H1--H3 are unaffected.
+  \item
+    \textbf{Catchment bootstrap} (1,000 resamples, seed 20261118) for
+    95\% CIs on the tercile-median structure share; catchments are
+    resampled because factor levels within a catchment are not
+    independent draws.
+  \item
+    \textbf{Pre-registered 5\% threshold} for ``structure
+    non-negligible'' (dated 18 Nov 2026, unchanged; §5.5 reports where
+    it holds and where it does not).
+  \item
+    \textbf{Fixed-GCM caveat:} shares describe the stated shortlist, not
+    the CMIP6 population.
+  \item
+    \textbf{Tercile is a stratification, not a factor} in the ANOVA;
+    tercile contrasts are descriptive (medians + bootstrap CIs).
+  \item
+    \textbf{Multiplicity:} the decision rule is a disjunction over 180
+    summary cells (3 terciles × 5 indicators × 4 SSPs × 3 windows);
+    noted as a limitation (§6).
+  \item
+    \textbf{Sensitivity (supplement, labelled):}
+    \texttt{lmer(value\ \textasciitilde{}\ structure\ ×\ tail\_policy\ +\ (1\textbar{}gcm))}
+    per cell --- residual df ≈ 47--51 --- reported as a robustness check
+    next to the fixed-effects partition, never as the primary result.
+  \end{enumerate}
+\item
+  \textbf{Benchmark (O5)}: same low-flow metric suite applied to
+  CAMELS-IND-Proj historical-per-GCM runs (skill) and 2015--2100
+  projections (projected change); distributions and per-catchment win
+  rates, stratified by confidence flag and aridity; the LSTM product is
+  benchmarked, never regenerated.
 \end{itemize}
 
-\section{Preliminary results (historical leg, completed)}
-\label{sec:results}
+\subsubsection{4.3 SSP projection leg (the substrate for
+O4)}\label{ssp-projection-leg-the-substrate-for-o4}
 
-\begin{table}[h]
-\centering\small
-\caption{Split-sample performance of calibrated GR4J (192 of 242 Tier-1/2
-catchments; 50 skipped for insufficient discharge records, all logged).}
-\begin{tabular}{lccc}
-\toprule
-Window & median KGE & median NSE & share NSE\,$>$\,0.5 \\
-\midrule
+Two notebooks, parallel to the historical chain and leaving every
+\texttt{QED\_*}/\texttt{HYD\_*} notebook untouched.
+
+\textbf{Aggregation (\texttt{QED\_40\_ssp\_aggregate.Rmd}).} Raw daily
+NetCDF → area-weighted (cos-latitude) catchment means on the 24,206-day
+window grid (2015--2040 + 2041--2060 + 2081--2100). The 2061--2080 gap
+is absent by design and travels downstream as a counted gap, never as an
+interpolated one. Unit handling is identical to the historical leg (pr
+kg m⁻² s⁻¹ → mm/day, K → °C; the 360-day HadGEM3-GC31-MM calendar is
+mapped day 1..30 of real months, invalid dates → NA). Three gates
+protect the output: (i) \textbf{magic-byte validation} of every input
+file (§3), so a server error page can never be read as a year of data;
+(ii) a \textbf{completeness gate} --- a combo is aggregated only when
+all 66 window years are present, because a half-downloaded series would
+produce NA-window low-flow metrics that are not low-flow metrics; (iii)
+a \textbf{per-combo status table} (\texttt{qed\_40\_combo\_status.csv},
+168 rows) that makes partial progress visible instead of inferred.
+Aggregation is idempotent: a combo already written is skipped, so the
+notebook can be re-run as acquisition fills, and every incomplete combo
+is logged with its year count and reason code.
+
+\textbf{EQM application (\texttt{QED\_50\_ssp\_apply.Rmd}).} EQM is
+fitted per catchment × variable × season on the \textbf{full historical
+1981--2014} pair (observed CAMELS-IND reference vs each model's
+historical aggregate) and applied to each SSP series with \texttt{pr}
+tail policy \textbf{linear}. Every corrected value carries
+\texttt{within\_range} / \texttt{extrapolated\_low} /
+\texttt{extrapolated\_high} / \texttt{source\_nan}, and every run writes
+\texttt{qed\_50\_run\_summary.csv} with per-model × SSP × catchment ×
+variable status and extrapolation share; combos lacking a complete
+aggregate are reported as \texttt{skipped\_ssp\_agg\_missing}, never
+silently omitted.
+
+\textbf{Tail-policy levels (the H4 factor --- defined precisely, per
+spec v2 §4.2 item 4).} \texttt{linear} = per-tail linear extension
+beyond the training CDF range: each tail is extended with the slope of
+its own upper/lower CDF segment, estimated as an OLS fit over the
+outermost five CDF points (anchored: Cannon et al.~2015
+(\citeproc{ref-cannon2015qm}{Cannon et al. 2015}); Themeßl et al.~2012
+(\citeproc{ref-themessl2012ecc}{Themeßl et al. 2012})).
+\texttt{constant} = clamp at the reference tail (the historical leg's
+precipitation policy). One factual sentence on why tail design is
+consequential: during a 23 Nov 2026 audit, the pre-fix \texttt{linear}
+implementation extended \emph{both} tails with the slope of the
+\emph{lowest} CDF interval --- for precipitation a drizzle artefact
+(\textasciitilde10⁻¹⁰ mm/d) --- turning a 60 mm/d future storm into
+4.0×10⁹ mm/d; 9,985 of 13,068 corrected precipitation series exceeded
+1,000 mm/d.~The corrected applier (robust upper-tail slope plus a 1,000
+mm/d physical ceiling on extrapolated precipitation, capped days counted
+and logged) was in place \textbf{before any H4 result existed}, and the
+historical leg used \texttt{constant} for precipitation, so the H1--H3
+results are unaffected. The \texttt{constant} level is an H4-only
+experiment (\texttt{QED\_SSP\_TAIL} override), never a reported
+projection.
+
+\textbf{Why the fit window differs from the ranking window.} The
+1981--2000 fit / 2001--2014 score discipline exists to stop a model
+being \emph{scored} on data used to \emph{fit its correction}.
+Projection application is not scoring --- there is no observation in
+2015--2100 to score against --- so the projection EQM is fitted on all
+available historical data to minimise correction error. The deviation is
+dated (18 Nov 2026) in \texttt{QED\_40} so it is reviewable rather than
+implicit.
+
+O4's decomposition (GCM × structure × tail policy) runs on the metric
+table these two notebooks produce; production facts are recorded because
+they bear on credibility: the aggregation path was validated end-to-end
+on one complete combo \emph{before} production (365/366 layers, correct
+dates, pr in mm/day with a 145 mm/day extreme against a 602 mm/day
+historical maximum), the first QED\_40 attempt \textbf{silently wrote
+zero files while reporting success} (a \texttt{split()} dot-vs-pipe
+keying bug, caught by comparing expected with written counts), and a
+6-worker parallel version was abandoned after \texttt{std::bad\_alloc}
+inside \texttt{terra} on a 15.7 GB machine --- the sequential runtime
+(\textasciitilde2 min per combo) is a measured choice, not an oversight.
+The decomposition itself executed 23 Nov 2026: §5.5.
+
+\subsection{5. Results}\label{results}
+
+\textbf{GR4J split-sample performance} (192 of 242 Tier-1/2 catchments;
+50 skipped, logged):
+
+{\def\LTcaptype{none} % do not increment counter
+\begin{longtable}[]{@{}llll@{}}
+\toprule\noalign{}
+Window & median KGE & median NSE & share NSE \textgreater{} 0.5 \\
+\midrule\noalign{}
+\endhead
+\bottomrule\noalign{}
+\endlastfoot
 Calibration 1982--2000 & 0.80 & 0.64 & 0.66 \\
 Validation 2001--2014 (out-of-sample) & 0.54 & 0.43 & 0.43 \\
-\bottomrule
-\end{tabular}
-\end{table}
+\end{longtable}
+}
 
-\begin{table}[h]
-\centering\small
-\caption{Top of the hybrid model shortlist (full table:
-\texttt{data\_processed/hyd/model\_shortlist\_final.csv}).}
-\begin{tabular}{clccc}
-\toprule
-Hybrid & Model & QED & DIS & mean PBIAS [\%] \\
-\midrule
-1 & EC-Earth3-Veg-LR & 1 & 3 & $-2.4$ \\
-2 & NorESM2-MM       & 7 & 1 & $-4.3$ \\
-3 & MIROC6           & 9 & 2 & $+3.9$ \\
-4 & MIROC-ES2L       & 3 & 7 & $+17.7$ \\
-5 & FGOALS-g3        & 2 & 13 & $+14.1$ \\
-6 & HadGEM3-GC31-MM  & 11 & 6 & $+0.4$ \\
-7 & EC-Earth3        & 14 & 4 & $+8.9$ \\
-\bottomrule
-\end{tabular}
-\end{table}
+\textbf{Hybrid shortlist (top 7 of 14; full table:
+\texttt{data\_processed/hyd/model\_shortlist\_final.csv}):}
 
-\noindent Key observations: forcing and discharge rankings diverge
-(Spearman $\rho=0.14$) --- the empirical wedge motivating O1/H1; absolute
-daily discharge skill is $\approx$0 for \emph{all} models (median KGE
-$-0.05$ to $-0.11$) because CMIP6 historical runs are free-running --- EQM
-corrects distributions, not timing, so volume bias and relative ordering are
-the interpretable signals \todo{support with QM-limits literature}; volume
-bias standouts: NorESM2-MM $-4.3$\%, HadGEM3-GC31-MM $+0.4$\%, MIROC6
-$+3.9$\%, MPI-ESM1-2-HR $+5.3$\%; extrapolation exposure 0.05\% (forcing)
-and 0.13\% (discharge evaluation), expected to rise in future windows
-(motivating the linear pr tail policy); GISS-E2-1-G and INM-CM5-0 dropped
-from the forcing-only top-14 (discharge ranks 21 and 20 of 22),
-MPI-ESM1-2-HR and GFDL-ESM4 added (5 and 9 of 22) --- the first application
-of the framework's own principle.
+{\def\LTcaptype{none} % do not increment counter
+\begin{longtable}[]{@{}lllll@{}}
+\toprule\noalign{}
+Hybrid & Model & QED & DIS & mean PBIAS {[}\%{]} \\
+\midrule\noalign{}
+\endhead
+\bottomrule\noalign{}
+\endlastfoot
+1 & EC-Earth3-Veg-LR & 1 & 3 & −2.4 \\
+2 & NorESM2-MM & 7 & 1 & −4.3 \\
+3 & MIROC6 & 9 & 2 & +3.9 \\
+4 & MIROC-ES2L & 3 & 7 & +17.7 \\
+5 & FGOALS-g3 & 2 & 13 & +14.1 \\
+6 & HadGEM3-GC31-MM & 11 & 6 & +0.4 \\
+7 & EC-Earth3 & 14 & 4 & +8.9 \\
+\end{longtable}
+}
 
-\section{Limitations}
-\label{sec:limits}
+\textbf{Key observations}
 
-Single members only (no internal-variability spread). GR4J/GR6J parameters
-calibrated on observed forcings --- transfer to model climates assumes
-structural stationarity (tested via O2/O4 interactions). Daily timing skill
-vs free-running models is inherently bounded; seasonal and distributional
-low-flow metrics complement daily KGE. \textbf{Abstraction/anthropogenic
-modulation is not modelled}: peninsular hard-rock basins with heavy pumping
-mean naturalized low-flow projections translate into water-scarcity
-statements only with caution --- the anthropogenic-drought phase (roadmap
-Year~4, using CAMELS-IND regulation attributes) addresses this and is
-flagged here, not promised.
+\begin{itemize}
+\tightlist
+\item
+  Forcing and discharge rankings are essentially orthogonal (Spearman ρ
+  = −0.027, 95\% CI {[}−0.095, 0.038{]}) --- the empirical wedge that
+  motivates O1/H1 (pilot estimate 0.14 re-estimated; §5.1).
+\item
+  Absolute daily discharge skill is ≈0 for \emph{all} models (median KGE
+  −0.05 to −0.11): CMIP6 historical runs are free-running; EQM corrects
+  distributions, not timing. Volume bias (PBIAS) and relative ordering
+  are the interpretable signals. \textbf{{[}TODO: QM-limits
+  literature{]}}
+\item
+  Volume-bias standouts: NorESM2-MM −4.3\%, HadGEM3-GC31-MM +0.4\%,
+  MIROC6 +3.9\%, MPI-ESM1-2-HR +5.3\%.
+\item
+  Extrapolation exposure: 0.05\% of scored forcing values, 0.13\% of
+  discharge-evaluation values --- future windows will raise this
+  (motivating the linear pr tail policy in projections).
+\item
+  From the forcing-only top-14, GISS-E2-1-G (discharge 21/22) and
+  INM-CM5-0 (20/22) were dropped; MPI-ESM1-2-HR (5/22) and GFDL-ESM4
+  (9/22) added --- the first application of the framework's own
+  principle.
+\end{itemize}
 
-\section{Publication portfolio and timeline}
-\label{sec:portfolio}
+\subsubsection{5.1 H1 verdict: forcing rank vs low-flow rank (Phase 1,
+executed 18 Nov
+2026)}\label{h1-verdict-forcing-rank-vs-low-flow-rank-phase-1-executed-18-nov-2026}
+
+The low-flow metric layer (\texttt{metric\_version\ v1}, pre-registered)
+was computed for all 22 models on the full calibrated roster (192
+catchments × 22 models = 21,120 metric rows, evaluation window
+2001--2014 only). After the guardrail-5 de-duplication (q95\_bias
+dropped: ρ = 0.937 with mam7\_bias), the composite low-flow ranking was
+built on the 78 catchments with non-ephemeral observed low flows
+(complete rows on logNSE, lf\_volume\_bias, dry\_spell\_bias,
+mam7\_bias).
+
+\textbf{H1 is SUPPORTED.} The pooled Spearman correlation between the
+forcing-composite rank (QED\_30) and the low-flow-composite rank is
+\textbf{ρ = −0.027} (catchment-bootstrap 95\% CI {[}−0.095, 0.038{]};
+1,000 resamples, seed 20261118) --- far below the pre-registered failure
+threshold of 0.6, and essentially zero rather than merely weak: the
+re-estimated wedge is \emph{stronger} than the pilot estimate (ρ =
+0.14), which used a Tier-1-only roster and mean-flow discharge ranks.
+Forcing-skill selection carries essentially no information about
+low-flow skill; the two-stage framework is retained as designed (verdict
+file: \texttt{data\_processed/lowflow/h1\_verdict.md}).
+
+Two mechanistic observations from the metric layer, reported as findings
+(not tuned):
+
+\begin{itemize}
+\tightlist
+\item
+  On ephemeral catchments, CMIP-driven GR4J keeps baseflow running where
+  the observed stream nearly dries up (simulated 10th-percentile flow ≈
+  7× observed; simulated series never fall below the observed Q90
+  threshold → dry-spell bias −100\%), while underestimating mean flow on
+  the same catchments. Whole-flow KGE is nearly blind to this; the
+  low-flow metrics are not --- the empirical basis of the divergence.
+\item
+  Observed SPI-12→SRI-12 propagation lags (frozen, 167 catchments)
+  concentrate at 0--1 months (median 1; 150/167), with the mean
+  \textbar SRI−SPI\textbar{} diagnostic ≈ 0.4--0.7 --- far from the
+  ≈0.013 Machhar-type coupling-artefact signature, confirming the
+  observed benchmark is fit for the H3 comparison.
+\end{itemize}
+
+\subsubsection{5.2 H2 verdict: GR4J vs GR6J structural divergence
+(observed forcings, base
+case)}\label{h2-verdict-gr4j-vs-gr6j-structural-divergence-observed-forcings-base-case}
+
+GR6J was calibrated under the identical-treatment rule (192 catchments
+calibrated under both structures; median validation KGE 0.527 vs GR4J
+0.543, paired Wilcoxon p = 0.45 --- the structures are comparable at the
+whole-flow level, so the low-flow comparison is the informative one).
+Low-flow metrics were computed for both structures on observed forcings
+(172 paired catchments, evaluation window 2001--2014).
+
+\textbf{H2 STANDS} (verdict file:
+\texttt{data\_processed/gr6j/h2\_verdict.md}). The divergence is
+material and \textbf{structured by aridity} exactly as the hypothesis
+anticipated, but with a direction that must be reported, not moralized:
+
+{\def\LTcaptype{none} % do not increment counter
+\begin{longtable}[]{@{}llll@{}}
+\toprule\noalign{}
+tercile & metric & median div (GR6J − GR4J) & n \\
+\midrule\noalign{}
+\endhead
+\bottomrule\noalign{}
+\endlastfoot
+dry & mam7\_bias & −449 pp & 29 \\
+dry & q95\_bias & −111 pp & 7 \\
+dry & lf\_volume\_bias & +158 pp & 8 \\
+wet & lf\_volume\_bias & +52 pp & 34 \\
+wet & mam7\_bias & −47 pp & 51 \\
+intermediate & lf\_volume\_bias & +32 pp & 36 \\
+wet/intermediate & q95\_bias & −12 / +13 pp & 32 / 31 \\
+\end{longtable}
+}
+
+logNSE is \textbf{not} materially divergent anywhere --- the structures
+differ in \emph{where} and \emph{how much} water they leave in the dry
+season, not in overall log-skill. GR6J's exponential store produces
+substantially lower 7-day minima (mam7) in the dry tercile (negative div
+= GR6J smaller), while overestimating low-flow volume (positive
+lf\_volume div) in wet and intermediate terciles. \textbf{Per the
+pre-registered guardrail this is quantified divergence, not a
+superiority claim}: whether GR6J's drier dry-season behaviour is more
+faithful on any given catchment is an out-of-sample question the
+SSP-projection leg (14 GCMs × 4 SSPs) will carry forward, and per H2's
+falsification rule the structural axis cannot be dropped from Objective
+4.
+
+\subsubsection{5.3 H3 verdict: drought-propagation reproduction (Phase
+3)}\label{h3-verdict-drought-propagation-reproduction-phase-3}
+
+SPI-12→SRI-12 propagation was computed for all 22 models
+(corrected-forcing SPI-12; full-period GR4J-simulated SRI-12,
+1982--2014) against the \textbf{frozen} observed lags, with the
+pre-registered reproduction band
+\texttt{\textbar{}L\_model\ −\ L\_obs\textbar{}\ ≤\ 1\ month} and the
+pre-registered three-clause falsification rule
+(\texttt{PROP\_PRE\_REGISTRATION.md}, dated before any model SRI was
+computed).
+
+\textbf{H3 STANDS} (verdict file:
+\texttt{data\_processed/prop/h3\_verdict.md}) --- with a structure that
+matters for the selection story:
+
+\begin{itemize}
+\tightlist
+\item
+  \textbf{Clauses 1--2 TRUE:} every model reproduces 0.91--0.96 of
+  catchments and the inter-model spread is \textless{} 0.10 ---
+  reproduction of the observed 0--1-month propagation regime is nearly
+  universal, and models differ only marginally on it.
+\item
+  \textbf{Clause 3 FALSE:} ρ(forcing rank, prop\_share) =
+  \textbf{−0.350} --- mean-flow selection does not find propagation
+  skill. The two \emph{kinds} of skill (whole-flow forcing skill vs
+  drought-propagation fidelity) are again nearly orthogonal, consistent
+  with H1's near-zero wedge: a framework that selects on mean-flow skill
+  alone cannot claim propagation competence.
+\item
+  \textbf{Artefact audit passed:} per-model mean
+  \textbar SRI−SPI\textbar{} = 0.29--0.34, far from the ≈ 0.013
+  Machhar-type too-tight-coupling signature --- propagation times were
+  measured, not assumed by construction.
+\item
+  109 model-combos excluded with reason codes (77 SRI gamma-fit
+  failures, 32 SPI gamma-fit failures; per-model denominators 156--166,
+  logged in \texttt{PROP\_10\_exclusions.csv}).
+\end{itemize}
+
+\textbf{Implication carried forward to Objective 4:} because clause 3
+fails, the drought-propagation criterion enters the selection test as a
+distinct dimension, not a corollary of forcing rank --- models
+near-universal on the frozen band but unrankable by mean-flow skill is
+precisely the case the two-stage + propagation framework was built to
+separate.
+
+\subsubsection{5.4 H5 verdict: the CAMELS-IND-Proj LSTM benchmark
+audited at low flows (Phase 5, executed 19 Nov
+2026)}\label{h5-verdict-the-camels-ind-proj-lstm-benchmark-audited-at-low-flows-phase-5-executed-19-nov-2026}
+
+Track B (CAMELS-IND-Proj, NA, Zenodo 21775597) was ingested as the
+\textbf{benchmark object only} --- never substrate, LSTM series never
+treated as observed. The archive was verified by CRC test (30,751 files,
+35.3 GB unpacked) and its structure discovered from the data: 13 GCMs ×
+5 scenarios, one aggregate streamflow table per GCM × scenario (472
+catchments, daily, cumecs), converted to mm/day with the same CAMELS-IND
+catchment areas used by GR4J/GR6J --- a conversion validated against the
+observed record (median LSTM/observed mean-flow ratio 1.17, hard-gated
+in \texttt{BENCH\_00}).
+
+Two audit findings about the dataset itself, both logged in
+\texttt{data\_processed/bench/bench\_00\_log.txt}:
+
+\begin{itemize}
+\tightlist
+\item
+  \textbf{The brief's ``confidence-flagged catchments'' claim is
+  unsupported by the distributed data.} No confidence/flag/NaN-mask file
+  exists anywhere in the archive, and the aggregate streamflow header is
+  exactly \texttt{year,\ month,\ day} + 472 gauge columns --- no flag
+  column. The claim must be re-scored against the data-description PDF
+  or withdrawn; until then H5 is computed on the full benchmark set, and
+  the paper does not use the flag construct (the count is deliberately
+  not repeated here).
+\item
+  \textbf{The benchmark shares only 8 of our 14 shortlisted GCMs} (12 of
+  our 22-model Track-A pool). One is a naming variant
+  (\texttt{EC-Earth3-Veg} = our \texttt{EC-Earth3-Veg-LR});
+  \texttt{NorESM2-LM} has no Track-A counterpart and is excluded with a
+  log line. The H5 like-for-like win rate is therefore computed on the
+  12-GCM intersection; the 8-model shortlist subset is the one that will
+  matter for the SSP-phase comparison.
+\end{itemize}
+
+The pre-registered rule was applied with \textbf{both legs evaluated}:
+the win rates below are shares of catchments where the LSTM cross-model
+median (over the 12 matched GCMs) beats the corresponding structure's
+cross-model median, on the shared catchment set, evaluation window
+2001--2014, \texttt{metric\_version\ v1}. The decision basis is the
+pooled table; the aridity split is supporting evidence only.
+
+\textbf{H5 STANDS} (verdict file:
+\texttt{data\_processed/bench/h5\_verdict.md}) --- the LSTM does
+\textbf{not} uniformly beat GR4J/GR6J at low flows, but the structure of
+the result is the finding:
+
+{\def\LTcaptype{none} % do not increment counter
+\begin{longtable}[]{@{}llll@{}}
+\toprule\noalign{}
+compared\_with & metric & LSTM win share & n \\
+\midrule\noalign{}
+\endhead
+\bottomrule\noalign{}
+\endlastfoot
+GR4J / GR6J & lf\_volume\_bias & \textbf{0.92 / 0.95} & 78 \\
+GR4J / GR6J & logNSE & \textbf{0.86 / 0.88} & 172 \\
+GR4J / GR6J & mam7\_bias & \textbf{0.81 / 0.78} & 127 \\
+GR4J / GR6J & q95\_bias & \textbf{0.71 / 0.71} & 70 \\
+GR4J / GR6J & dry\_spell\_bias & \textbf{0.39 / 0.39} & 78 \\
+\end{longtable}
+}
+
+The LSTM is better on the \textbf{magnitude} low-flow metrics --- total
+skill (logNSE), low-flow volume, 7-day minima, Q95 --- but loses the
+\textbf{duration} metric on both structures: consecutive dry days below
+the observed Q90 threshold are reproduced better by the calibrated
+conceptual models in 61\% of catchments. That split is exactly what a
+single blended score (the kind the LSTM leaderboard framing invites)
+would have hidden: the benchmark is \emph{wetter and smoother}, not more
+faithful to drought spells. This is the process-based evidence behind
+the ``LSTM dry tail unaudited'' gap identified in the prior-art table
+--- now audited, with the audit's own metric-level resolution.
+
+The aridity split supports the pre-registered suspicion in its expected
+direction: the LSTM's logNSE advantage is smallest in the dry tercile
+(0.62 vs GR4J, 0.68 vs GR6J, against 0.98/0.98 and 0.93/0.95 in
+intermediate/wet), and on dry-spell duration in the dry tercile the LSTM
+wins only 25\% of catchments. The dry-tercile cells are small (n = 7--53
+per metric) and are reported as such, not averaged away.
+
+\textbf{Implications carried forward:} (i) H4's decomposition remains
+necessary --- a benchmark that wins magnitudes but loses drought
+duration cannot arbitrate drought-projection uncertainty on its own;
+(ii) the SSP-phase comparison (our GR4J/GR6J projections vs the
+benchmark's 2015--2100 envelope, already cached as per-SSP window
+summaries in \texttt{bench\_lstm\_proj\_lowflow.csv}) now has a
+like-for-like GCM basis; (iii) the framework's two-track discipline is
+vindicated rather than merely asserted --- the benchmark was usable
+\emph{because} it was treated as an audit object, not as substrate.
+
+\subsubsection{5.5 H4 verdict: GCM × structure × tail-policy
+decomposition of projected low-flow variance (Phase 4, executed 23 Nov
+2026)}\label{h4-verdict-gcm-structure-tail-policy-decomposition-of-projected-low-flow-variance-phase-4-executed-23-nov-2026}
+
+The decomposition runs on the projection layer assembled 23 Nov 2026
+(\texttt{DECOMP\_10}, \texttt{metric\_version\ v1\_proj}): \textbf{192}
+catchments calibrated under both structures (64/64/64 aridity terciles),
+driven with each corrected SSP forcing under the calibrated GR4J
+\textbf{and} GR6J parameters, five always-defined low-flow indicators,
+three future windows (2021--2040, 2041--2060, 2082--2100; the 2061--2080
+archive gap excluded, never interpolated), \textbf{14/13/13/14} GCMs
+(HadGEM3-GC31-MM unpublished for ssp245/ssp370 --- logged, never
+padded). \textbf{11,520} ANOVA cells (192 × 5 metrics × 4 SSPs × 3
+windows); 11,514 decomposed, 6 dropped (one catchment's
+\texttt{lf\_ratio\_q95} is zero-variance in six cells --- logged in
+\texttt{h4\_dropped\_cells.csv}). Per the design note in §4.2, the
+per-cell factorial is \textbf{saturated} (residual df = 0): every number
+below is an exact variance partition, and the inference is the
+pre-registered rule plus a 1,000-resample catchment bootstrap (seed
+20261118), not per-cell significance tests.
+
+\textbf{H4 STANDS} (verdict file:
+\texttt{data\_processed/decomp/h4\_verdict.md}) --- the pre-registered
+disjunction rule triggers in \textbf{149 of the 180} summary cells (3
+terciles × 5 metrics × 4 SSPs × 3 windows), and in \textbf{all 36 cells
+for every one of the four low-flow-specific metrics} (Q95, 7-day minima,
+low-tail shape, dry-spell length). The only metric where structure does
+not matter is mean flow --- and that contrast is itself the headline:
+
+{\def\LTcaptype{none} % do not increment counter
+\begin{longtable}[]{@{}
+  >{\raggedright\arraybackslash}p{(\linewidth - 4\tabcolsep) * \real{0.3333}}
+  >{\raggedright\arraybackslash}p{(\linewidth - 4\tabcolsep) * \real{0.3333}}
+  >{\raggedright\arraybackslash}p{(\linewidth - 4\tabcolsep) * \real{0.3333}}@{}}
+\toprule\noalign{}
+\begin{minipage}[b]{\linewidth}\raggedright
+metric
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+structure share, median (dry / intermediate / wet tercile)
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+GCM share, same terciles
+\end{minipage} \\
+\midrule\noalign{}
+\endhead
+\bottomrule\noalign{}
+\endlastfoot
+\texttt{log10\_q95} & \textbf{0.661 / 0.364 / 0.367} & 0.226 / 0.455 /
+0.511 \\
+\texttt{log10\_mam7} & \textbf{0.677 / 0.350 / 0.568} & 0.232 / 0.547 /
+0.363 \\
+\texttt{lf\_ratio\_q95} & \textbf{0.592 / 0.361 / 0.342} & 0.208 / 0.423
+/ 0.552 \\
+\texttt{dry\_spell\_days} & 0.254 / 0.137 / 0.110 & 0.445 / 0.626 /
+0.723 \\
+\texttt{log10\_meanq} & 0.028 / 0.026 / 0.036 & \textbf{0.952 / 0.963 /
+0.953} \\
+\end{longtable}
+}
+
+Three findings carry the paper's central argument:
+
+\begin{enumerate}
+\def\labelenumi{\arabic{enumi}.}
+\tightlist
+\item
+  \textbf{In dry catchments, hydrological model structure is the largest
+  single source of projected low-flow variance} --- 66\% (Q95) and 68\%
+  (7-day minima) versus \textasciitilde23\% for GCM choice --- with
+  catchment-bootstrap 95\% CIs on the structure share far above 5\%
+  (e.g.~dry × Q95 × ssp585 × 2082--2100: median 0.56, CI {[}0.47,
+  0.73{]}). GCM dominance returns in intermediate and wet catchments
+  (0.45--0.72). The adaptation message is tercile-specific: which GCM
+  you project with matters most in wetter catchments; which
+  \emph{hydrological model} you project with matters most in the dry
+  ones --- exactly where low-flow decisions bite.
+\item
+  \textbf{Mean flow hides the structure axis entirely}: GCM choice
+  explains 95--96\% of whole-flow variance and structure
+  \textasciitilde3\%, yet structure owns 34--68\% of low-flow variance
+  on the same simulations. This is the variance-decomposition
+  restatement of the H1 rank divergence (ρ ≈ 0) --- one-stage,
+  mean-flow-based selection is not merely weakly correlated with
+  low-flow skill; it is blind to the dominant low-flow uncertainty in
+  dry catchments.
+\item
+  \textbf{The bias-correction tail design is a negligible uncertainty
+  source}: the \texttt{tail\_policy} share is ≤ 0.5\% in every cell
+  (median 0.000--0.0015), with \texttt{structure:tail} interaction
+  shares of the same order. Given the 23 Nov EQM defect history (§4.3),
+  this is a substantive result, not an artefact of the fix: once the
+  linear extension is physically bounded, \emph{whether} the quantile
+  mapper clamps or extrapolates future extremes barely moves catchment
+  low-flow indicators. The three sources are also demonstrably not
+  additive --- the \texttt{gcm:structure} interaction reaches 19\% of
+  variance (dry tercile, dry-spell length), which the reported
+  seven-term partition makes visible.
+\end{enumerate}
+
+\textbf{Sensitivity (supplement, \texttt{h4\_lmer\_sensitivity.csv}):}
+modelling GCM as a random intercept
+(\texttt{value\ \textasciitilde{}\ structure\ ×\ tail\_policy\ +\ (1\textbar{}gcm)}
+per cell --- the one H4 model with an error term, residual df ≈ 47--51)
+reproduces the qualitative ordering; the median signed difference to the
+fixed-effects GCM share is +11.5 pp (95th \textbar difference\textbar{}
+65.1 pp), because the ICC-style share conditions only on GCM + residual
+variance while the fixed share partitions all variance including the
+large structure/tail effects. Both are reported; the fixed-effects
+partition remains primary (§6).
+
+\subsection{6. Limitations}\label{limitations}
+
+\textbf{Fixed GCM factor.} GCM is a fixed factor --- the 14-model
+shortlist is stated, not sampled --- so the H4 shares describe variance
+among \emph{these} models and do not generalise to the CMIP6 population;
+coverage is 14/13/13/14 GCMs (ssp126/245/370/585; HadGEM3-GC31-MM has no
+published ssp245/ssp370, logged). \textbf{Saturation.} The per-cell
+factorial is saturated (0 residual df), so there are no per-cell
+significance tests by design; the inference is the pre-registered 5\%
+disjunction rule plus the catchment bootstrap, stated as methodological
+clarity in §4.2, not apologised for here. \textbf{Tercile is a
+stratification, not a factor} --- ``structure share is higher in dry
+catchments'' is descriptive (medians + bootstrap CIs), not a formal
+test. \textbf{Multiplicity.} The disjunction rule spans 180 summary
+cells (3 terciles × 5 indicators × 4 SSPs × 3 windows); under a global
+null, at least one exceedance is plausible --- the rule's safeguards are
+that it triggers on tercile \emph{medians} and was pre-registered on 18
+Nov 2026 before any H4 number existed. \textbf{The random-intercept
+sensitivity does not agree with the fixed share within 5 pp} (median
++11.5 pp, 95th \textbar difference\textbar{} 65.1 pp; §5.5): the
+ICC-style share conditions only on GCM + residual variance, while the
+fixed share partitions all variance including the large structure and
+tail effects --- the gap is evidence of how large those effects are, and
+both estimators are reported (supplement); the fixed partition is
+primary. \textbf{Tail policy.} The 23 Nov EQM defect and its fix
+preceded any H4 result; the historical leg used \texttt{constant} for
+precipitation, so H1--H3 are unaffected --- the fix and its audit trail
+are in \texttt{QED\_50} §0b and \texttt{AGENT\_LOG.md}.
+
+Single members only (no internal-variability spread). GR4J/GR6J
+parameters calibrated on observed forcings --- transfer to model
+climates assumes structural stationarity (tested via O2/O4
+interactions). Daily timing skill vs free-running models is inherently
+bounded; seasonal and distributional low-flow metrics complement daily
+KGE. \textbf{Abstraction/anthropogenic modulation is not modelled}:
+peninsular hard-rock basins with heavy pumping mean naturalized low-flow
+projections translate into water-scarcity statements only with caution
+--- the anthropogenic-drought phase (roadmap Year 4, using CAMELS-IND
+regulation attributes) addresses this and is flagged here, not promised.
+
+\subsection{7. Publication portfolio and
+timeline}\label{publication-portfolio-and-timeline}
 
 Planned as 3--4 papers --- full objectives, data dependencies, target
 journals and quarter-level timeline in
-\texttt{research\_plan/PAPER\_PORTFOLIO.md}. Summary:
+\textbf{\texttt{research\_plan/PAPER\_PORTFOLIO.md}}. Summary:
 
-\begin{table}[h]
-\centering\small
-\caption{Paper portfolio.}
-\begin{tabular}{p{1.2cm}p{6.8cm}p{2.6cm}p{4.6cm}}
-\toprule
-Paper & Core content & Target & Status \\
-\midrule
-P1 (this repo) & Low-flow-aware CMIP6 selection + GR6J axis + propagation +
-decomposition (O1--O4) & WRR / HESS & historical leg done; SSP + phases
-pending \\
-P2 & CAMELS-IND-Proj low-flow audit (O5) --- first process-based critical
-user & HESS / Sci.\ Data companion & download pending \\
-P3 & National streamflow-drought climatology \& low-flow threshold framework
-for Peninsular India & WRR / JoH & engine = P1 \\
-P4 & ML low-flow forecasting / S2S; optional P5 anthropogenic drought \&
-e-flows (Year 4) & HESS / WRR & foundation = P1+P2 \\
-\bottomrule
-\end{tabular}
-\end{table}
+{\def\LTcaptype{none} % do not increment counter
+\begin{longtable}[]{@{}
+  >{\raggedright\arraybackslash}p{(\linewidth - 6\tabcolsep) * \real{0.2500}}
+  >{\raggedright\arraybackslash}p{(\linewidth - 6\tabcolsep) * \real{0.2500}}
+  >{\raggedright\arraybackslash}p{(\linewidth - 6\tabcolsep) * \real{0.2500}}
+  >{\raggedright\arraybackslash}p{(\linewidth - 6\tabcolsep) * \real{0.2500}}@{}}
+\toprule\noalign{}
+\begin{minipage}[b]{\linewidth}\raggedright
+Paper
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Core content
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Target
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Status
+\end{minipage} \\
+\midrule\noalign{}
+\endhead
+\bottomrule\noalign{}
+\endlastfoot
+\textbf{P1} (this repo) & Low-flow-aware CMIP6 selection + GR6J axis +
+propagation + decomposition (O1--O4/H1--H4) & WRR / HESS & \textbf{all
+five verdicts executed}; camera-ready polish pending \\
+\textbf{P2} & CAMELS-IND-Proj low-flow audit (O5/H5) --- first
+process-based critical user & HESS / Sci. Data companion & historical
+audit executed (H5 stands); SSP envelope comparison pending \\
+\textbf{P3} & National streamflow-drought climatology \& low-flow
+threshold framework for Peninsular India (roadmap Phase 2 flagship) &
+WRR / JoH & engine = P1 \\
+\textbf{P4} & ML low-flow forecasting / S2S (roadmap Phase 3); optional
+P5 anthropogenic drought \& e-flows (Year 4) & HESS / WRR & foundation =
+P1+P2 \\
+\end{longtable}
+}
 
-\section{Literature survey TODO}
-\label{sec:todo}
+\subsection{8. Literature survey TODO}\label{literature-survey-todo}
 
-\todo{GR4J/airGR origins; EQM variants on unpaired (free-running) series;
-CMIP6 South-Asia evaluation; CAMELS-IND + CAMELS-IND-Proj dataset papers and
-prior applications; KGE interpretability; ECS values for shortlisted models;
-drought-propagation canon (India: Betwa HSJ 2026 --- verify 80\%/42$\rightarrow$63\%
-figures at camera-ready); Wilby \& Harris 2006 uncertainty ordering; IAHS
-HELPING positioning.}
+GR4J/airGR origins; EQM variants on unpaired (free-running) series;
+CMIP6 South-Asia evaluation; CAMELS-IND + CAMELS-IND-Proj dataset papers
+and prior applications; KGE interpretability; ECS values for shortlisted
+models; drought-propagation canon (India: Betwa HSJ 2026 --- verify
+80\%/42→63\% figures at camera-ready); Wilby \& Harris 2006
+(\citeproc{ref-wilby2006thames}{Wilby and Harris 2006}) uncertainty
+ordering; IAHS HELPING positioning.
 
-\section*{Data and code availability}
-Reproducible from R Markdown notebooks (\texttt{QED\_00--30},
-\texttt{HYD\_00--30}; phase modules \texttt{LOWFLOW\_*}, \texttt{GR6J\_*},
-\texttt{PROP\_*}, \texttt{DECOMP\_*}, \texttt{BENCH\_*} specified in
-\texttt{AGENTS.md}) at \url{https://github.com/anixn/CMIP6_IND_GR4J}. Small
-result tables are tracked in the repository; bulk series are regenerated by
-the notebooks from raw data.
+\textbf{Camera-ready verification list (spec v2 section 8):} Senatore
+2022 full citation; Meresa 2023 and Wang 2025 full citations; Park
+2025's exact factor list (does it include a bias-correction factor?);
+Naresh \& Mathew 2026 journal attribution; Betwa quantitative details
+(80\% decrease, 42→63\%); Liu 2025 complete author list. \#\# Data and
+code availability
 
-\begin{thebibliography}{12}
-\bibitem{perrin2003} Perrin, C., Michel, C., Andr\'eassian, V. (2003).
-Improvement of a parsimonious model for streamflow simulation. Journal of
-Hydrology, 279, 275--289.
-\bibitem{oudin2005} Oudin, L., et al. (2005). Which potential
-evapotranspiration input for a lumped rainfall--runoff model? Journal of
-Hydrology, 303, 290--306.
-\bibitem{eyring2016} Eyring, V., et al. (2016). Overview of the Coupled
-Model Intercomparison Project Phase 6 (CMIP6). Geoscientific Model
-Development, 9, 1937--1958.
-\bibitem{gupta2009} Gupta, H.V., Kling, H., Yilmaz, K.K., Martinez, G.F.
-(2009). Decomposition of the mean squared error and NSE performance
-criteria. Journal of Hydrology, 377, 80--91.
-\bibitem{mangukiya2025} Mangukiya, N.K., et al. (2025). CAMELS-IND:
-hydrometeorological time series and catchment attributes for 472 catchments
-in Peninsular India. Earth System Science Data, 17, 461--491.
-\bibitem{chuphal2024} Chuphal, D.S., Kushwaha, A.P., Aadhar, S., Mishra, V.
-(2024). Drought Atlas of India, 1901--2020. Scientific Data, 11, 7.
-\bibitem{mishra2020} Mishra, V., Bhatia, U., Tiwari, A.D. (2020).
-Bias-corrected climate projections for South Asia from CMIP6. Scientific
-Data, 7, 1--13.
-\bibitem{singh2026} Singh, A., Mangukiya, N.K., Sahu, G., Sharma, A. (2026).
-CAMELS-IND-Proj: daily streamflow projections for 472 Peninsular Indian
-catchments under future climate scenarios. Zenodo 21775597, CC BY 4.0.
-\bibitem{mangukiya2026wrr} Mangukiya, N.K., et al. (2026). Benchmarking and
-selecting optimal hydrological models. Water Resources Research,
-2026WR044753.
-\bibitem{sharma2026hp} Sharma, V., Barbhuiya, S., Gupta, V. (2026).
-Projections of future streamflow for India informed by CMIP6 global climate
-models. Hydrological Processes, 40(3), e70476.
-\bibitem{coron2017} Coron, L., et al. (2017). airGR: an R package.
-\todo{verify full citation}
-\bibitem{wilby2006} Wilby, R.L., Harris, I. (2006). A framework for
-assessing uncertainties in climate change impacts: low-flow scenarios for
-the River Thames, UK. Water Resources Research, 42, W02419.
-\todo{verify}
-\end{thebibliography}
-\noindent\todo{Bibliography is a verified minimal set; complete survey
-pending.}
+Reproducible from R Markdown notebooks (\texttt{QED\_00–30},
+\texttt{HYD\_00–30}; phase modules \texttt{LOWFLOW\_*},
+\texttt{GR6J\_*}, \texttt{PROP\_*}, \texttt{DECOMP\_*},
+\texttt{BENCH\_*} specified in \texttt{AGENTS.md}) at
+\url{https://github.com/anixn/CMIP6_IND_GR4J}. Small result tables
+tracked in the repo; bulk series regenerated by the notebooks.
+
+\protect\phantomsection\label{refs}
+\begin{CSLReferences}{1}{1}
+\bibitem[\citeproctext]{ref-cannon2015qm}
+Cannon, Alex J., Stephen R. Sobie, and Trevor Q. Murdock. 2015. {``Bias
+Correction of {GCM} Precipitation by Quantile Mapping: How Well Do
+Methods Preserve Changes in Quantiles and Extremes?''} \emph{Journal of
+Climate} 28 (17): 6938--59.
+\url{https://doi.org/10.1175/JCLI-D-14-00754.1}.
+
+\bibitem[\citeproctext]{ref-chuphal2024droughtatlas}
+Chuphal, Dharm Singh, Apurv Prakash Kushwaha, Saran Aadhar, and Vimal
+Mishra. 2024. {``Drought Atlas of {India}, 1901--2020.''}
+\emph{Scientific Data} 11: 7.
+\url{https://doi.org/10.1038/s41597-023-02862-0}.
+
+\bibitem[\citeproctext]{ref-kimchung2026hess}
+Kim, J. H., and E.-S. Chung. 2026. {``Insights into Uncertainties in
+Future Drought Analysis Using Hydrological Simulation Model.''}
+\emph{Hydrology and Earth System Sciences} 30: 227--47.
+\url{https://doi.org/10.5194/hess-30-227-2026}.
+
+\bibitem[\citeproctext]{ref-liu2025atmosphere}
+{Liu, T. et al.} 2025. {``Future Streamflow and Hydrological Drought
+Under {CMIP6} Climate Projections.''} \emph{Atmosphere} 16 (6): 691.
+\url{https://doi.org/10.3390/atmos16060691}.
+
+\bibitem[\citeproctext]{ref-mangukiya2026wrr}
+{Mangukiya, Nishant Kumar et al.} 2026. {``Benchmarking and Selecting
+Optimal Hydrological Models for Catchment-Scale Streamflow Simulation in
+{Peninsular India}.''} \emph{Water Resources Research} 62.
+
+\bibitem[\citeproctext]{ref-mangukiya2025camelsind}
+{Mangukiya, Nishant Kumar, Anurag Sharma, Ankita Wany, et al.} 2025.
+{``{CAMELS-IND}: Hydrometeorological Time Series and Catchment
+Attributes for 472 Catchments in Peninsular India.''} \emph{Earth System
+Science Data} 17: 461--91.
+\url{https://doi.org/10.5194/essd-17-461-2025}.
+
+\bibitem[\citeproctext]{ref-mishra2020biascorrected}
+Mishra, Vimal, Udit Bhatia, and Aadhar Tiwari. 2020. {``Bias-Corrected
+Climate Projections for {South Asia} from {CMIP6}.''} \emph{Scientific
+Data} 7: 1--13. \url{https://doi.org/10.1038/s41597-020-00681-1}.
+
+\bibitem[\citeproctext]{ref-park2025jhrs}
+Park, J., J. H. Kim, J. H. Sung, and E. S. Chung. 2025. {``Quantifying
+Uncertainty Contributions of Hydrologic Modeling Process to Hydrologic
+Drought Projection in {South Korea}.''} \emph{Journal of Hydrology:
+Regional Studies} 62: 102991.
+\url{https://doi.org/10.1016/j.ejrh.2025.102991}.
+
+\bibitem[\citeproctext]{ref-senatore2022med}
+{Senatore, A. et al.} 2022. {``Uncertainty Contributions to Hydrological
+Drought Projection Under Climate Change in the {Mediterranean}.''}
+\emph{VERIFY}.
+
+\bibitem[\citeproctext]{ref-sharma2026hp}
+Sharma, V., S. Barbhuiya, and V. Gupta. 2026. {``Projections of Future
+Streamflow for {India} Informed by {CMIP6} Global Climate Models.''}
+\emph{Hydrological Processes} 40 (3): e70476.
+
+\bibitem[\citeproctext]{ref-singh2026camelsindproj}
+Singh, A., N. K. Mangukiya, G. Sahu, and A. Sharma. 2026.
+\emph{{CAMELS-IND-Proj}: Daily Streamflow Projections for 472
+{Peninsular Indian} Catchments Under Future Climate Scenarios}. Zenodo.
+\url{https://doi.org/10.5281/zenodo.21775597}.
+
+\bibitem[\citeproctext]{ref-themessl2012ecc}
+Themeßl, Matthias Jakob, Andreas Gobiet, and Georg Heinrich. 2012.
+{``Empirical-Statistical Downscaling and Error Correction of Regional
+Climate Models and Its Impact on the Climate Change Signal.''}
+\emph{Climatic Change} 112 (2): 449--68.
+\url{https://doi.org/10.1007/s10584-011-0224-4}.
+
+\bibitem[\citeproctext]{ref-wilby2006thames}
+Wilby, Robert L., and Ian Harris. 2006. {``A Framework for Assessing
+Uncertainties in Climate Change Impacts: Low-Flow Scenarios for the
+{River Thames}, {UK}.''} \emph{Water Resources Research} 42: W02419.
+\url{https://doi.org/10.1029/2005WR004065}.
+
+\end{CSLReferences}
 
 \end{document}

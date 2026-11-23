@@ -1,6 +1,6 @@
 ---
 title: "DECOMP 00 -- Uncertainty decomposition of low-flow projections (H4): GCM x structure x EQM tail policy"
-subtitle: "Phase 4 of the low-flow framework (H4 / Objective 4) -- variance-component machinery; consumes the factor-tagged metric table assembled by the SSP pipeline"
+subtitle: "Phase 4 of the low-flow framework (H4 / Objective 4) -- variance-component machinery; consumes the factor-tagged metric table assembled by the SSP pipeline. ANOVA spec per manuscript/NOVELTY_AND_ANOVA_SPEC.md (v2, 23 Nov 2026): the per-cell factorial is SATURATED -- exact variance partition, no per-cell F/p/eta2p/omega2."
 output:
    html_document:
       css: style_academic.css
@@ -23,12 +23,13 @@ catchment-bootstrap CIs. This is the H4 machinery; it is deliberately
 data_processed/decomp/input_metrics.csv
    catchment, arid_tercile, ssp, window, metric,
    gcm, structure ("GR4J"|"GR6J"), tail_policy ("constant"|"linear"),
-   value, n_gap_filled, extrapolation_share, metric_version
+   value, metric_note, n_gap_filled, extrapolation_share, pr_max_mm,
+   metric_version
 ```
 
-assembled by the SSP pipeline (QED_50 apply x2 tail policies -> HYD-style
-simulation per structure -> LOWFLOW-style metrics). A smoke test with
-simulated data validates the machinery before any real input exists.
+assembled by the SSP pipeline (QED_50 apply x2 tail policies -> GR4J and GR6J
+simulation -> projection indicators). A smoke test with simulated data
+validates the machinery before any real input exists.
 
 **Design (pre-registered 18 Nov 2026):**
 
@@ -48,6 +49,20 @@ simulated data validates the machinery before any real input exists.
    H4 FAILS if structure < 5% everywhere — still a useful negative result.
 4. **No blending:** every metric is decomposed separately (responses are
    never averaged into a composite before decomposition).
+5. **GCM set is stated, never balanced away (guardrail 7).** `HadGEM3-GC31-MM`
+   has no published ssp245/ssp370 on ESGF, so those two SSPs run a 13-GCM
+   factorial (52 runs per catchment) and ssp126/ssp585 a 14-GCM one (56 runs).
+   Each cell is balanced; the verdict records the coverage per SSP.
+6. **The per-cell design is SATURATED (spec v2, 23 Nov 2026, § 5.0).** Rows per
+   cell = |GCM| x 2 x 2 = 56 (52) and the model `value ~ gcm * structure *
+   tail_policy` has exactly 56 (52) parameters, so residual df = 0: the
+   per-cell ANOVA is an **exact variance partition, not a significance test**.
+   No F, no p, no per-cell CI from the ANOVA; eta-partial is identically 1 and
+   omega-squared undefined under saturation, so neither is computed. The SS
+   share over the seven terms **is** classical eta-squared in this balanced
+   design. Inference = the pre-registered 5% disjunction rule + the
+   catchment bootstrap (which is *why* the bootstrap exists). This is verified
+   against the real input in the production chunk before any fit.
 
 ```{r log-file}
 decomp_output_dir <- file.path(hyd_project_root, "data_processed", "decomp")
@@ -61,14 +76,29 @@ decomp_log_file <- file.path(decomp_output_dir, "decomp_00_log.txt")
 decomp_n_boot  <- 1000L
 decomp_seed    <- 20261118L
 decomp_h4_structure_min <- 0.05   # structure share matters if >= 5%
-decomp_min_runs <- 56             # full factorial per catchment
+decomp_min_runs <- 52L            # balanced factorial floor: 13 GCM x 2 x 2
+                                  # (14 GCM x 2 x 2 = 56 for ssp126/ssp585)
+decomp_lmer_sensitivity <- TRUE   # spec v2 section 5.6: RECOMMENDED SENSITIVITY,
+                                  # never the primary result. GCM as random
+                                  # intercept is the only H4 model with an
+                                  # error term, so it is the only place where
+                                  # residual diagnostics / classical effect
+                                  # sizes mean anything. BH-correction would
+                                  # apply only if it emitted p-values; it does
+                                  # not (variance-component share only).
 ```
 
 ## 2. Machinery (works on any input table with the factor columns)
 
 ```{r machinery}
 decomp_one <- function(dt) {
-   # dt: one catchment x metric x ssp x window slice, full factorial grid
+   # dt: one catchment x metric x ssp x window slice, full factorial grid.
+   # Spec v2 (23 Nov 2026): the design is saturated (n_obs = n_params), so the
+   # fit is an exact variance partition over SEVEN terms -- main effects, the
+   # three 2-way interactions AND the 3-way interaction (never buried in a
+   # residual; there is none). Type I anova() is used: balanced + orthogonal
+   # + saturated => I = II = III, and car::Anova would return NaN F/p with
+   # 0 residual df. No F, no p, no eta-partial / omega-squared (degenerate).
    if (data.table::uniqueN(dt$gcm) < 3 ||
        data.table::uniqueN(dt$structure) < 2 ||
        data.table::uniqueN(dt$tail_policy) < 2) return(NULL)
@@ -78,6 +108,8 @@ decomp_one <- function(dt) {
    # trim, then match with anchored patterns (substring matching would
    # otherwise pollute interactions: "gcm" also matches "gcm:structure")
    names(ss) <- trimws(rownames(summary(fit)[[1]]))
+   ss <- ss[names(ss) != "Residuals"]   # 0 df, SS ~ 0: reported as exactly
+                                        # zero, never fitted around (spec 5.1)
    total <- sum(ss, na.rm = TRUE)
    if (!is.finite(total) || total <= 0) return(NULL)
    get_share <- function(pattern) {
@@ -92,6 +124,7 @@ decomp_one <- function(dt) {
       share_gcm_struct = get_share("^gcm:structure$"),
       share_gcm_tail   = get_share("^gcm:tail_policy$"),
       share_struct_tail= get_share("^structure:tail_policy$"),
+      share_three_way  = get_share("^gcm:structure:tail_policy$"),
       n_terms = length(ss))
 }
 
@@ -144,26 +177,95 @@ res <- decomp_run(sim, metrics = "q95_bias", n_boot = 10, seed = 1)$shares
 print(res)
 stopifnot(res$share_gcm > 0.5, res$share_structure > 0.05,
           res$share_structure > res$share_tail)
+share_sum <- res[, sum(share_gcm + share_structure + share_tail +
+                       share_gcm_struct + share_gcm_tail + share_struct_tail +
+                       share_three_way)]
+stopifnot(abs(share_sum - 1) < 1e-6, res$n_terms[1] == 7L)
 cat("smoke test passed: GCM-dominant grid recovers the planted order",
-    "(gcm > structure > tail)\n")
+    "(gcm > structure > tail); seven-term partition sums to 1\n")
 ```
 
 ## 4. Production hook (runs when the SSP metric table exists)
 
-```{r production, eval=FALSE}
+```{r production, eval=file.exists(file.path(hyd_project_root, "data_processed", "decomp", "input_metrics.csv"))}
 # Runs only when data_processed/decomp/input_metrics.csv exists (assembled by
-# the SSP pipeline: QED_50 x2 tail policies -> GR4J+GR6J simulation ->
-# LOWFLOW-style metrics). Until then this chunk stays dormant so the
-# notebook always knits.
+# DECOMP_10_ssp_metrics.Rmd: QED_50 x2 tail policies -> GR4J+GR6J -> projection
+# indicators). The chunk stays dormant otherwise so the notebook always knits.
 input_fp <- file.path(decomp_output_dir, "input_metrics.csv")
 stopifnot(file.exists(input_fp))
 input_dt <- data.table::fread(input_fp, colClasses = list(character =
                   c("catchment", "arid_tercile", "gcm", "structure",
                     "tail_policy", "metric", "ssp", "window")))
 
+# --- balance guard: an ANOVA on an unbalanced grid is meaningless ----------
+# (DECOMP_10 checks this too; here it is enforced at the point of use, and
+#  every excluded cell is written to h4_dropped_cells.csv, never dropped
+#  silently -- AGENTS.md guardrail 7.)
+shape <- input_dt[, .(n = .N,
+                      n_gcm = data.table::uniqueN(gcm),
+                      n_struct = data.table::uniqueN(structure),
+                      n_policy = data.table::uniqueN(tail_policy)),
+                  by = .(catchment, metric, ssp, window)]
+shape[, balanced := n == n_gcm * n_struct * n_policy]
+cat(sprintf("H4 cells: %d | balanced: %d | unbalanced: %d\n",
+            nrow(shape), sum(shape$balanced), sum(!shape$balanced)))
+
+cells_all <- shape[, .(catchment, metric, ssp, window)]
+unbalanced <- shape[balanced == FALSE, .(catchment, metric, ssp, window,
+                                         n, n_gcm, n_struct, n_policy)]
+
+input_dt <- merge(input_dt,
+                  shape[balanced == TRUE, .(catchment, metric, ssp, window)],
+                  by = c("catchment", "metric", "ssp", "window"))
+
+# --- saturation check (spec v2 section 5.0): the partition must be exact ----
+# n_params = 1 + (g-1) [gcm] + 1 [structure] + 1 [tail] + (g-1) [g:s]
+#          + (g-1) [g:t] + 1 [s:t] + (g-1) [g:s:t] = g * 2 * 2 = n_obs
+# => residual df = 0. Verify on the real input BEFORE any fit (spec mandate).
+sat <- shape[balanced == TRUE, .(n_obs = n[1], n_gcm = n_gcm[1]), by = ssp]
+sat[, n_params := 1 + (n_gcm - 1) + 1 + 1 + (n_gcm - 1) + (n_gcm - 1) +
+       1 + (n_gcm - 1)]
+sat[, residual_df := n_obs - n_params]
+print(sat)
+stopifnot(all(sat$residual_df == 0L))
+cat("SATURATED per-cell design confirmed on the real input: residual df = 0\n",
+    "in every SSP. The per-cell ANOVA is an exact variance partition:\n",
+    "no F, no p, no per-cell eta-partial (=1 identically) or omega-squared\n",
+    "(undefined). Inference = pre-registered 5% disjunction + catchment\n",
+    "bootstrap; the SS share IS classical eta-squared in this design.\n")
+
 d <- decomp_run(input_dt, metrics = unique(input_dt$metric),
                 n_boot = decomp_n_boot, seed = decomp_seed)$shares
 data.table::fwrite(d, file.path(decomp_output_dir, "variance_shares.csv"))
+
+# --- no silent drops: which cells produced no decomposition, and why -------
+cells_done <- unique(d[, .(catchment, metric, ssp, window)])
+zero_var <- data.table::fsetdiff(shape[balanced == TRUE,
+                                       .(catchment, metric, ssp, window)],
+                                 cells_done)
+drop_rows <- list()
+if (nrow(unbalanced)) {
+   ub <- unbalanced
+   ub[, `:=`(reason_code = "unbalanced_factorial", detail = paste0(
+      "n=", n, " expected ", n_gcm * n_struct * n_policy))]
+   drop_rows[["unbalanced"]] <- ub
+}
+if (nrow(zero_var)) {
+   zv <- zero_var[, reason_code := "zero_variance_or_insufficient_levels"]
+   drop_rows[["zero_var"]] <- zv
+}
+dropped <- if (length(drop_rows)) {
+   data.table::rbindlist(drop_rows, fill = TRUE)
+} else {
+   data.table::data.table(catchment = character(0), metric = character(0),
+                          ssp = character(0), window = character(0),
+                          reason_code = character(0))
+}
+if (nrow(dropped))
+   data.table::fwrite(dropped, file.path(decomp_output_dir,
+                                         "h4_dropped_cells.csv"))
+cat(sprintf("ANOVA cells: %d requested | %d decomposed | %d dropped\n",
+            nrow(cells_all), nrow(cells_done), nrow(dropped)))
 
 set.seed(decomp_seed)
 cats <- unique(d$catchment)
@@ -183,38 +285,174 @@ ci <- boot_all[, .(lo = stats::quantile(share_structure, 0.025),
 
 med <- d[, .(median_share_gcm = round(stats::median(share_gcm), 3),
              median_share_structure = round(stats::median(share_structure), 3),
-             median_share_tail = round(stats::median(share_tail), 3)),
+             median_share_tail = round(stats::median(share_tail), 3),
+             median_share_gcm_struct = round(stats::median(share_gcm_struct), 3),
+             median_share_gcm_tail = round(stats::median(share_gcm_tail), 3),
+             median_share_struct_tail = round(stats::median(share_struct_tail), 3),
+             median_share_three_way = round(stats::median(share_three_way), 3)),
          by = .(arid_tercile, metric, ssp, window)]
 tab <- merge(med, ci, by = c("arid_tercile", "metric", "ssp", "window"))
 data.table::fwrite(tab, file.path(decomp_output_dir, "h4_summary.csv"))
 
+# count the decision-rule evidence, per the pre-registered disjunction
+n_cells_ge5 <- sum(tab$median_share_structure >= decomp_h4_structure_min)
+cat(sprintf("summary cells with structure share >= %.0f%%: %d of %d\n",
+            100 * decomp_h4_structure_min, n_cells_ge5, nrow(tab)))
+
 h4_stands <- any(tab$median_share_structure >= decomp_h4_structure_min)
-verdict <- if (h4_stands) "H4 STANDS (structure share non-negligible somewhere)"
-           else "H4 FAILS (structure < 5% everywhere -- useful negative result)"
+verdict <- if (h4_stands) {
+   "H4 STANDS (structure share non-negligible somewhere)"
+} else {
+   "H4 FAILS (structure < 5% everywhere -- useful negative result)"
+}
+
+# GCM coverage actually used (13 vs 14) -- stated in the verdict, never smoothed
+cov_fp <- file.path(decomp_output_dir, "h4_gcm_coverage.csv")
+cov_txt <- if (file.exists(cov_fp)) {
+   cov <- data.table::fread(cov_fp, colClasses = list(character = "ssp"))
+   paste0("- ", cov$ssp, ": ", cov$n_gcm, " GCMs")
+} else "- coverage file missing (see DECOMP_10)"
+cov_txt <- c(cov_txt,
+   "- HadGEM3-GC31-MM ssp245/ssp370 are unpublished on ESGF",
+   "  (`data_processed/logs/ssp_unavailable.csv`, `gcm_scenario_not_published`).",
+   "  ssp245/ssp370 therefore use a 13-GCM balanced factorial (52 runs per",
+   "  catchment), ssp126/ssp585 a 14-GCM one (56 runs). Neither is padded.")
+
 writeLines(c(
    "# H4 verdict -- variance decomposition of low-flow projections",
    "",
    paste0("**Date:** ", format(Sys.time()), " | seed ", decomp_seed,
           " | bootstrap resamples: ", decomp_n_boot),
+   paste0("**Input:** `data_processed/decomp/input_metrics.csv` | metric_version ",
+          paste(unique(input_dt$metric_version), collapse = ", ")),
+   paste0("**Cells:** ", nrow(cells_all), " requested, ", nrow(cells_done),
+          " decomposed, ", nrow(dropped), " dropped (`h4_dropped_cells.csv`)"),
    "",
-   paste0("**Rule (AGENTS.md):** GCM dominates; structure share >= 5% in ",
-          ">= 1 tercile x metric means structure matters for adaptation."),
+   "**Design note (spec v2, 23 Nov 2026).** The per-cell factorial is",
+   "saturated (56 or 52 observations = the full parameter count, residual",
+   "df = 0): the per-cell analysis is an exact variance partition, not a",
+   "significance test. No F, no p, no per-cell eta-partial or omega-squared.",
+   "The SS share over the seven terms IS classical eta-squared in this",
+   "balanced design. Inference = the pre-registered rule below plus the",
+   "catchment bootstrap.",
    "",
-   paste0("**Verdict: ", verdict, "**"),
+   paste0("**Rule (AGENTS.md, pre-registered 18 Nov 2026):** GCM dominates; ",
+          "structure share >= 5% in >= 1 tercile x metric means structure ",
+          "matters for adaptation. Disjunction over ", nrow(tab),
+          " summary cells (3 terciles x 5 metrics x 4 SSPs x 3 windows); the ",
+          "rule triggers on the tercile MEDIAN share, not a single catchment. ",
+          "Multiplicity of the disjunction is a stated limitation."),
+   "",
+   paste0("**Verdict: ", verdict, "** (", n_cells_ge5, " of ", nrow(tab),
+          " summary cells have structure share >= ",
+          100 * decomp_h4_structure_min, "%)"),
+   "",
+   "## GCM coverage (explicit, not balanced away)",
+   "",
+   cov_txt,
+   "",
+   "## Shares by aridity tercile x metric x SSP x window (medians;",
+   "lo/hi = 2.5/97.5 percentiles of the catchment bootstrap on the structure",
+   "share)",
    "",
    knitr::kable(tab),
    "",
-   "Responses never blended: one decomposition per metric per tercile."),
+   "Responses never blended: one decomposition per metric per tercile.",
+   "All seven ANOVA terms are reported, including the 3-way interaction."),
    file.path(decomp_output_dir, "h4_verdict.md"))
 print(tab)
+```
+
+## 5. Sensitivity: GCM as a random intercept (spec v2 § 5.6 — supplement only)
+
+```{r lmer-sensitivity, eval=file.exists(file.path(hyd_project_root, "data_processed", "decomp", "input_metrics.csv"))}
+# The ONLY model in the H4 chain with an error term: residual df ~ 47-51 per
+# cell, so this is the only place residual diagnostics / classical effect
+# sizes are meaningful. Reports the random-effects GCM share next to the
+# fixed-effects share; agreement within ~5 pp = robustness confirmation.
+sens_fp <- file.path(decomp_output_dir, "h4_lmer_sensitivity.csv")
+if (!decomp_lmer_sensitivity || !requireNamespace("lme4", quietly = TRUE)) {
+   cat("lmer sensitivity skipped (flag off or lme4 unavailable); ",
+       "the fixed-effects partition remains the primary result.\n")
+} else {
+   keys <- unique(input_dt[, .(catchment, metric, ssp, window)])
+   fixed_lookup <- d[, .(catchment, metric, ssp, window, share_gcm_fixed = share_gcm)]
+   sens <- vector("list", nrow(keys))
+   n_fail <- 0L
+   t_s <- Sys.time()
+   for (i in seq_len(nrow(keys))) {
+      k <- keys[i]
+      cd <- input_dt[catchment == k$catchment & metric == k$metric &
+                        ssp == k$ssp & window == k$window]
+      m <- tryCatch(
+         suppressMessages(suppressWarnings(
+            lme4::lmer(value ~ structure * tail_policy + (1 | gcm), data = cd))),
+         error = function(e) NULL)
+      if (is.null(m)) {
+         n_fail <- n_fail + 1L; next
+      }
+      vc    <- lme4::VarCorr(m)
+      v_g   <- unname(attr(vc[[1]], "stddev"))^2
+      v_res <- unname(attr(vc, "sc"))^2
+      sens[[i]] <- data.table::data.table(
+         catchment = k$catchment, metric = k$metric, ssp = k$ssp,
+         window = k$window,
+         share_gcm_lmer = if (is.finite(v_g + v_res) && (v_g + v_res) > 0)
+                             v_g / (v_g + v_res) else NA_real_)
+      if (i %% 1000L == 0L)
+         cat(sprintf("lmer %d/%d | %.1f min\n", i, nrow(keys),
+                     as.numeric(difftime(Sys.time(), t_s, units = "mins"))))
+   }
+   sens_dt <- data.table::rbindlist(sens, use.names = TRUE, fill = TRUE)
+   sens_dt <- merge(sens_dt, fixed_lookup, by = c("catchment", "metric", "ssp", "window"))
+   sens_dt[, delta_gcm_share := share_gcm_lmer - share_gcm_fixed]
+   data.table::fwrite(sens_dt, sens_fp)
+   cat(sprintf("lmer sensitivity: %d cells fit, %d failed (logged)\n",
+               nrow(sens_dt), n_fail))
+   d_med <- sens_dt[, .(median_delta_pp = round(100 * stats::median(delta_gcm_share,
+                                                            na.rm = TRUE), 1),
+                        p95_abs_delta_pp = round(100 * stats::quantile(
+                           abs(delta_gcm_share), 0.95, na.rm = TRUE), 1))]
+   print(d_med)
+   agree <- d_med$p95_abs_delta_pp <= 5   # spec: within ~5 percentage points
+   verdict_line <- if (agree) {
+      "Robustness CONFIRMED: the random-intercept GCM share agrees with the fixed-effects share (95% of cells within 5 pp)."
+   } else {
+      "Robustness NOT confirmed at the 5-pp level: both shares are reported in the supplement and the divergence is discussed in the limitations. The two estimators answer different questions -- the ICC-style share conditions on the random intercept only (GCM + residual variance), while the fixed share partitions ALL variance including the structure and tail effects -- so a large gap here means the structure/tail effects themselves are large, not that the partition is wrong."
+   }
+   lines_append <- c("", "---", "",
+                "## Sensitivity: GCM as random intercept (supplement)",
+                "", paste0("Model: `value ~ structure * tail_policy + (1 | gcm)` ",
+                           "per cell (the only H4 model with an error term)."),
+                paste0("Cells fit: ", nrow(sens_dt), " | failed: ", n_fail),
+                paste0("Median signed difference (lmer - fixed GCM share): ",
+                       d_med$median_delta_pp, " pp | 95th |difference|: ",
+                       d_med$p95_abs_delta_pp, " pp"),
+                paste0("**", verdict_line, "**"),
+                "The fixed-effects partition remains the primary result; the ",
+                "random-intercept version is a robustness check, never a ",
+                "replacement.")
+   verdict_fp <- file.path(decomp_output_dir, "h4_verdict.md")
+   write(lines_append, file = verdict_fp, append = TRUE)
+   cat("verdict file extended with the sensitivity statement\n")
+}
 ```
 
 ## Take-away
 
 - The machinery is validated by the planted-effect smoke test (GCM-dominant
-  grid recovers gcm > structure > tail ordering).
-- The production chunk activates exactly when the SSP pipeline delivers
-  `input_metrics.csv`; the H4 verdict is written against the pre-registered
-  rule with bootstrap CIs, per metric, per aridity tercile.
+  grid recovers gcm > structure > tail ordering; the seven-term partition
+  sums to 1).
+- The per-cell factorial is **saturated** (spec v2, 23 Nov 2026): the analysis
+  is an exact variance partition — no per-cell F, p, eta-partial or
+  omega-squared; the SS share IS classical eta-squared here. Verified on the
+  real input before any fit.
+- All seven terms are reported, including the 3-way interaction: the
+  interactions are the evidence that the three uncertainty sources are not
+  additive.
+- The inference is the pre-registered 5% disjunction rule plus the
+  catchment bootstrap; the `lmer` random-intercept model is the one H4 model
+  with an error term and is reported as a labelled sensitivity, never as the
+  primary result.
 - If the structure share is < 5% everywhere, that is the reported result:
   Objective 4 collapses to GCM + bias-correction only (per AGENTS.md).

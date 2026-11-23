@@ -1,0 +1,9 @@
+var,model,ssp,files_bad,reason_code,checked
+pr,CanESM5,ssp370,2,netcdf_corrupt_terra_unreadable,2026-11-21
+tasmax,ACCESS-ESM1-5,ssp370,1,netcdf_corrupt_terra_unreadable,2026-11-21
+tasmax,CanESM5,ssp370,4,netcdf_corrupt_terra_unreadable,2026-11-21
+tasmax,EC-Earth3,ssp126,2,netcdf_corrupt_terra_unreadable,2026-11-21
+tasmax,FGOALS-g3,ssp126,3,netcdf_corrupt_terra_unreadable,2026-11-21
+tasmax,GFDL-ESM4,ssp370,9,netcdf_corrupt_terra_unreadable,2026-11-21
+tasmax,MPI-ESM1-2-HR,ssp585,5,netcdf_corrupt_terra_unreadable,2026-11-21
+tasmin,CNRM-CM6-1,ssp370,1,netcdf_corrupt_terra_unreadable,2026-11-21

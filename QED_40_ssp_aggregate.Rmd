@@ -420,17 +420,23 @@ if (!length(made)) {
    # model names contain "-" but not "_", ssp is the last token
    var_of2  <- vapply(parts, `[`, character(1), 2)
    ssp_of2  <- vapply(parts, `[`, character(1), length(parts[[1]]))
-   model_of2 <- vapply(parts, function(p) paste(p[3:(length(p) - 1)], collapse = "_"))
+   model_of2 <- vapply(parts, function(p) paste(p[3:(length(p) - 1)], collapse = "_"),
+                        character(1))
 
-   combos_made <- data.table::expand.grid(model = model_of2, ssp = ssp_of2,
-                                          var = var_of2, stringsAsFactors = FALSE)
-   n_expected <- nrow(expand.grid(model = models_ssp, ssp = qed_ssp_list,
-                                  var = qed_vars))
+   # `model_of2` / `ssp_of2` / `var_of2` are per-FILE vectors (154 rows), so
+   # expand.grid() on them directly would build the 154^3 cartesian product.
+   # The expected grid is the unique (model, ssp, var) triples that were made.
+   combos_made <- base::expand.grid(model = unique(model_of2),
+                                    ssp = unique(ssp_of2),
+                                    var = unique(var_of2),
+                                    stringsAsFactors = FALSE)
+   n_expected <- nrow(base::expand.grid(model = models_ssp, ssp = qed_ssp_list,
+                                        var = qed_vars))
    cat("Agg files written:", nrow(combos_made), "of", n_expected, "expected\n")
-   missing <- data.table::setdiff(
-      data.table::expand.grid(model = models_ssp, ssp = qed_ssp_list,
-                              var = qed_vars, stringsAsFactors = TRUE),
-      combos_made)
+   missing <- dplyr::anti_join(
+      base::expand.grid(model = models_ssp, ssp = qed_ssp_list,
+                        var = qed_vars, stringsAsFactors = TRUE),
+      combos_made, by = c("model", "ssp", "var"))
    if (nrow(missing)) {
       cat("MISSING (logged in QED_40_ssp_exclusions.csv and",
           "qed_40_combo_status.csv):\n")
