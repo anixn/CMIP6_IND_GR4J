@@ -496,6 +496,28 @@ climate change (standardised indices) & GR4J low-flow projection exists
 decomposition; propagation analysis exists elsewhere --- the
 \textbf{selection use} over Indian catchments is new (§4.2 states the
 index is borrowed) \\
+\textbf{Bhardwaj, Shah, Aadhar \& Mishra 2020
+(\citeproc{ref-bhardwaj2020propagation}{Bhardwaj et al. 2020})}
+(\emph{JGR-Atmospheres}, 229 citations) + \textbf{Gupta, Jain \& Pandey
+2024 (\citeproc{ref-gupta2024propagation}{Gupta et al. 2024})}
+(\emph{Hydrol. Process.}) & Propagation of meteorological to
+hydrological drought \textbf{across India}; changing propagation times
+in a semi-arid Indian basin & \textbf{Closest propagation prior art ---
+must be cited.} Both characterise propagation; neither uses reproduction
+of the observed lag as a \textbf{GCM selection criterion} nor tests
+whether mean-flow selection finds it (H3). Our H3 is the selection use,
+not the index \\
+\textbf{Bosshard et al.~2013
+(\citeproc{ref-bosshard2013uncertainty}{Bosshard et al. 2013})}
+(\emph{WRR}, 389 citations) + \textbf{Chen et al.~2011
+(\citeproc{ref-chen2011uncertainty}{Chen et al. 2011})} + \textbf{Clark
+et al.~2016 (\citeproc{ref-clark2016uncertainty}{{Clark et al.} 2016})}
+& The canonical ANOVA/variance-decomposition lineage for hydrological
+climate-impact ensembles; the uncertainty-source inventory (GCM
+structure, downscaling, bias correction, hydrological structure,
+internal variability) & Method borrowed and anchored (§4.2); the
+decomposition itself is not claimed as new --- the \textbf{factor set}
+(tail design) and the application are \\
 \textbf{Barker, Hannaford, Chiverton \& Svensson 2016
 (\citeproc{ref-barker2016propagation}{Barker et al. 2016})} (\emph{HESS}
 20:2483--2505, cited by \textasciitilde711) & \textbf{Cross-correlation
@@ -687,7 +709,12 @@ in §5.1--5.4; O4 pending,
     balanced within every cell; \textbf{11,520 cells} (192 catchments ×
     5 indicators × 4 SSPs × 3 windows); GCM coverage
     \textbf{14/13/13/14} (HadGEM3-GC31-MM has no published ssp245/ssp370
-    --- logged, never padded).
+    --- logged, never padded). The ANOVA over GCM × downscaling/model
+    factors is the canonical construction of Bosshard et al.~(2013)
+    (\citeproc{ref-bosshard2013uncertainty}{Bosshard et al. 2013}), with
+    the uncertainty-source inventory of Clark et al.~(2016)
+    (\citeproc{ref-clark2016uncertainty}{{Clark et al.} 2016}) framing
+    the factor choice.
   \item
     \textbf{Saturation statement.} 56 (52) observations per cell equal
     the full parameter count, so the design has \textbf{no residual df}:
@@ -1054,6 +1081,14 @@ observed lag distribution (bottom). All 22 models sit above the
 pre-registered 0.80 falsification band (propagation share 0.91-0.96),
 yet forcing rank is uncorrelated with propagation skill (rho = -0.350).}
 \end{figure}
+
+Propagation from meteorological to hydrological drought has been
+characterised for India as a whole
+(\citeproc{ref-bhardwaj2020propagation}{Bhardwaj et al. 2020}) and for
+individual semi-arid basins (\citeproc{ref-gupta2024propagation}{Gupta
+et al. 2024}); H3 asks a different question --- whether a climate
+model's ability to reproduce the \emph{observed propagation delay}
+carries selection information beyond mean-flow skill.
 
 SPI-12→SRI-12 propagation was computed for all 22 models
 (corrected-forcing SPI-12; full-period GR4J-simulated SRI-12,
@@ -1645,12 +1680,31 @@ Svensson. 2016. {``From Meteorological to Hydrological Drought Using
 Standardised Indicators.''} \emph{Hydrology and Earth System Sciences}
 20: 2483--505. \url{https://doi.org/10.5194/hess-20-2483-2016}.
 
+\bibitem[\citeproctext]{ref-bhardwaj2020propagation}
+Bhardwaj, Kunal, Deep Shah, Saran Aadhar, and Vimal Mishra. 2020.
+{``Propagation of Meteorological to Hydrological Droughts in {India}.''}
+\emph{Journal of Geophysical Research: Atmospheres} 125: e2020JD033455.
+\url{https://doi.org/10.1029/2020JD033455}.
+
+\bibitem[\citeproctext]{ref-bosshard2013uncertainty}
+Bosshard, Thomas, Maria Carambia, Klaus Goergen, Sven Kotlarski, Stefan
+Krähenmann, and Massimiliano Zappa. 2013. {``Quantifying Uncertainty
+Sources in an Ensemble of Hydrological Climate-Impact Projections.''}
+\emph{Water Resources Research} 49: 1523--36.
+\url{https://doi.org/10.1029/2011WR011533}.
+
 \bibitem[\citeproctext]{ref-cannon2015qm}
 Cannon, Alex J., Stephen R. Sobie, and Trevor Q. Murdock. 2015. {``Bias
 Correction of {GCM} Precipitation by Quantile Mapping: How Well Do
 Methods Preserve Changes in Quantiles and Extremes?''} \emph{Journal of
 Climate} 28 (17): 6938--59.
 \url{https://doi.org/10.1175/JCLI-D-14-00754.1}.
+
+\bibitem[\citeproctext]{ref-chen2011uncertainty}
+Chen, Jie, François P. Brissette, Annie Poulin, and Robert Leconte.
+2011. {``Overall Uncertainty Study of the Hydrological Impacts of
+Climate Change for a {Canadian} Watershed.''} \emph{Water Resources
+Research} 47: W12542. \url{https://doi.org/10.1029/2011WR010602}.
 
 \bibitem[\citeproctext]{ref-chuphal2024droughtatlas}
 Chuphal, Dharm Singh, Apurv Prakash Kushwaha, Saran Aadhar, and Vimal
@@ -1662,6 +1716,12 @@ Mishra. 2024. {``Drought Atlas of {India}, 1901--2020.''}
 Chuphal, Dharm Singh, and Vimal Mishra. 2026. {``Observation-Constrained
 Projections Reveal Robust Streamflow Increases in {Indian} Rivers.''}
 \emph{Earth's Future} 14.
+
+\bibitem[\citeproctext]{ref-clark2016uncertainty}
+{Clark, Martyn P., Robert L. Wilby, Ethan D. Gutmann, et al.} 2016.
+{``Characterizing Uncertainty of the Hydrologic Impacts of Climate
+Change.''} \emph{Current Climate Change Reports} 2: 119--28.
+\url{https://doi.org/10.1007/s40641-016-0034-x}.
 
 \bibitem[\citeproctext]{ref-eyring2016cmip6}
 Eyring, Veronika, Sandrine Bony, Gerald A. Meehl, et al. 2016.
@@ -1676,6 +1736,13 @@ Gudmundsson, Luc, J. B. Bremnes, J. E. Haugen, and T. Engen-Skaugen.
 Scale Using Statistical Transformations -- a Comparison of Methods.''}
 \emph{Hydrology and Earth System Sciences} 16: 3383--90.
 \url{https://doi.org/10.5194/hess-16-3383-2012}.
+
+\bibitem[\citeproctext]{ref-gupta2024propagation}
+Gupta, Ajay, Manoj Kumar Jain, and Rajendra Prasad Pandey. 2024. {``The
+Changing Characteristics of Propagation Time from Meteorological Drought
+to Hydrological Drought in a Semi-Arid River Basin in {India}.''}
+\emph{Hydrological Processes}, ahead of print.
+\url{https://doi.org/10.1002/hyp.15266}.
 
 \bibitem[\citeproctext]{ref-gupta2009kge}
 Gupta, Hoshin V., Harald Kling, Kasim K. Yilmaz, and Guillermo F.

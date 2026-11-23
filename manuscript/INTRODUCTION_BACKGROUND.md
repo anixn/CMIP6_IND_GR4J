@@ -6,10 +6,16 @@ merge/trim them yourself. Every bullet carries its `@bibkey` (all keys are in
 23 Nov 2026 — see `LITERATURE_SURVEY.md`). Bullets marked **[needs citation]**
 assert something true but not yet backed by a verified reference.
 
-**Web of Science status:** the WoS search interface loads but result pages
-require the institutional sign-in in the app browser (session unauthenticated),
-so the bullets use the publisher-verified set. Re-run the WoS queries under your
-login and add anything new; the claim structure below will not change.
+**Web of Science status:** the WoS interface loads **IP-authenticated for your
+institute** (the footer shows PANDIT DEENDAYAL PETROLEUM UNIV), but its Nextgen
+Angular search form ignores synthetic input from automation — only real
+keystrokes register. Two ways to bring WoS results in: (i) type one query in the
+visible tab (e.g. `TS=("low flow" AND CMIP6 AND India)`) and tell me, and I will
+harvest the result list; or (ii) paste the WoS search URL after you run it.
+Meanwhile the bullets below use the publisher-verified set plus **OpenAlex**
+searches run 23 Nov 2026 (verified metadata and citation counts), which surfaced
+the India-propagation and ANOVA-canon references now added (Bhardwaj 2020,
+Gupta 2024, Bosshard 2013, Chen 2011, Clark 2016).
 
 ---
 
@@ -54,8 +60,15 @@ login and add anything new; the claim structure below will not change.
 ## F. Drought propagation as a selection dimension
 
 - SPI→SRI lag via cross-correlation of standardised indices is standard [@barker2016propagation], and propagation under climate change is an active literature (Ireland [@meresa2023jgr]; Yangtze [@ma2023yangtze]).
+- **India-specific propagation already exists and must be cited:** Bhardwaj, Shah, Aadhar & Mishra (2020, *JGR-Atmospheres*, 229 citations) map the propagation of meteorological to hydrological drought across India [@bhardwaj2020propagation]; Gupta, Jain & Pandey (2024, *Hydrol. Process.*) track changing propagation times in a semi-arid Indian basin [@gupta2024propagation]. **Differentiation:** both characterise propagation; neither turns reproduction of the observed propagation lag into a **GCM selection criterion** or asks whether mean-flow selection finds it — that is our H3.
 - The **selection use** is what is new here: no prior study asks whether a GCM that reproduces the observed propagation lag is the one you should project droughts with.
 - Guardrail: propagation must be measured as the cross-correlation lag, never inferred from near-identity of SPI and SRI (the Machhar-type artefact); our diagnostic (mean |SRI−SPI| = 0.29–0.34, far from the ≈0.013 signature) is reported as evidence.
+
+## F2. The uncertainty-decomposition canon (for §4.2 positioning)
+
+- ANOVA/variance decomposition of hydrological climate-impact ensembles has a canonical lineage: Chen, Brissette, Poulin & Leconte (2011, *WRR*, 469 citations) partitioned overall uncertainty for a Canadian watershed [@chen2011uncertainty]; **Bosshard et al. (2013, *WRR*, 389 citations) is the reference that formalised ANOVA over GCM × downscaling × hydrological-model factors** [@bosshard2013uncertainty] — cite it as the method's statistical anchor, alongside Park 2025 and Kim & Chung 2026 as the recent applications.
+- Clark et al. (2016, *Curr. Clim. Change Rep.*, 334 citations) frames the uncertainty source inventory (GCM structure, downscaling, bias correction, hydrological model structure, internal variability) [@clark2016uncertainty] — use it to motivate *why* a three-factor decomposition with a tail-design axis is a defensible subset rather than an arbitrary one.
+- These three make the concession in §2 airtight: the *method* is canonical, the *factor set* (tail design) and the *application* (India, low flows, 192 catchments) are the contribution.
 
 ## G. Ready-to-merge gap statements (one sentence each)
 
