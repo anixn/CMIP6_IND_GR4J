@@ -29,6 +29,7 @@ args <- c(
    "--citeproc",
    "--bibliography", shQuote(normalizePath(bib, winslash = "/")),
    "--metadata", "link-citations=true",
+   "--resource-path", shQuote(normalizePath("manuscript", winslash = "/")),
    "-V", "geometry:margin=2.3cm",
    "-V", "colorlinks=true",
    "-V", "fontsize=11pt")
@@ -41,15 +42,20 @@ if (!requireNamespace("tinytex", quietly = TRUE))
    stop("tinytex not installed")
 if (!tinytex::is_tinytex()) cat("NOTE: using system LaTeX, not TinyTeX\n")
 
-st <- tryCatch(tinytex::xelatex(tex, clean = TRUE), error = function(e) e)
-# xelatex() returns invisible NULL on success; confirm by output file:
-pdf <- file.path("manuscript", "paper.pdf")
+# compile from manuscript/ so the relative figure paths (figures/...) resolve;
+# paper.md keeps manuscript-relative paths so GitHub renders them too
+old_wd <- setwd(dirname(normalizePath(tex)))
+st <- tryCatch(tinytex::xelatex(basename(tex), clean = TRUE), error = function(e) e)
+pdf <- file.path("paper.pdf")
 if (!file.exists(pdf)) {
    cat("xelatex path failed (", conditionMessage(if (inherits(st, "error")) st else "no pdf"),
        "); falling back to pdflatex...\n")
-   st <- tinytex::pdflatex(tex, clean = TRUE)
+   st <- tinytex::pdflatex(basename(tex), clean = TRUE)
 }
-if (!file.exists(pdf)) stop("PDF was not produced -- check the LaTeX log above")
+setwd(old_wd)
+if (!file.exists(file.path("manuscript", "paper.pdf")))
+   stop("PDF was not produced -- check the LaTeX log above")
+pdf <- file.path("manuscript", "paper.pdf")
 cat("built", pdf, "-", file.size(pdf), "bytes,", format(Sys.time()), "\n")
 
 # 3. check for unresolved citations ---------------------------------------

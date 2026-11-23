@@ -83,6 +83,8 @@ Scenario-driven water-availability and drought studies over Indian catchments de
 
 ## 4. Methods
 
+![**Figure 1.** The two-stage, low-flow-aware selection framework. Stage 1 selects GCMs on out-of-sample forcing skill; stage 2 drives the calibrated GR4J and GR6J structures with the corrected SSP forcings and evaluates low-flow metrics; the five hypotheses are tested as decision gates (H1–H3, H5 on the historical/discharge level, H4 on the projection layer). Aridity terciles stratify every claim.](figures/fig1_framework.png){width=100%}
+
 ### 4.1 Historical leg (complete)
 1. **Tiering** by forcing availability (1981–2014): Tier 1 ≥70% (180), Tier 2 ≥30% (62), Tier 3 excluded (230) — all logged.
 2. **Aggregation**: area-weighted catchment means per model × variable (66 series per model).
@@ -109,6 +111,8 @@ Scenario-driven water-availability and drought studies over Indian catchments de
 - **Benchmark (O5)**: same low-flow metric suite applied to CAMELS-IND-Proj historical-per-GCM runs (skill) and 2015–2100 projections (projected change); distributions and per-catchment win rates, stratified by confidence flag and aridity; the LSTM product is benchmarked, never regenerated.
 
 ### 4.3 SSP projection leg (the substrate for O4)
+
+![**Figure 2.** Data flow and roster discipline. The raw SSP archive (10,692 netCDF files; no 2061–2080 files) is aggregated to 162 of 168 model × SSP × variable combos, corrected under both tail policies, simulated with both structures (124,416 simulations) and reduced to 622,080 metric rows analysed as 11,514 saturated ANOVA cells. The roster funnel (472 → 242 → 192 → 172/78/167) is stated, never padded.](figures/fig2_dataflow.png){width=100%}
 
 Two notebooks, parallel to the historical chain and leaving every `QED_*`/`HYD_*` notebook untouched.
 
@@ -153,6 +157,8 @@ O4's decomposition (GCM × structure × tail policy) runs on the metric table th
 
 ### 5.1 H1 verdict: forcing rank vs low-flow rank (Phase 1, executed 18 Nov 2026)
 
+![**Figure 3.** H1: forcing-skill rank versus low-flow-skill rank for the 22 all-variable CMIP6 models. The fitted line is flat (Spearman rho = -0.027, 95% CI [-0.095, 0.038]); the dashed diagonal marks perfect rank agreement. The pre-registered failure threshold (rho > 0.6) is far away.](figures/fig3_h1_rank_divergence.png){width=100%}
+
 The low-flow metric layer (`metric_version v1`, pre-registered) was computed for all 22 models on the full calibrated roster (192 catchments × 22 models = 21,120 metric rows, evaluation window 2001–2014 only). After the guardrail-5 de-duplication (q95_bias dropped: ρ = 0.937 with mam7_bias), the composite low-flow ranking was built on the 78 catchments with non-ephemeral observed low flows (complete rows on logNSE, lf_volume_bias, dry_spell_bias, mam7_bias).
 
 **H1 is SUPPORTED.** The pooled Spearman correlation between the forcing-composite rank (QED_30) and the low-flow-composite rank is **ρ = −0.027** (catchment-bootstrap 95% CI [−0.095, 0.038]; 1,000 resamples, seed 20261118) — far below the pre-registered failure threshold of 0.6, and essentially zero rather than merely weak: the re-estimated wedge is *stronger* than the pilot estimate (ρ = 0.14), which used a Tier-1-only roster and mean-flow discharge ranks. Forcing-skill selection carries essentially no information about low-flow skill; the two-stage framework is retained as designed (verdict file: `data_processed/lowflow/h1_verdict.md`).
@@ -163,6 +169,8 @@ Two mechanistic observations from the metric layer, reported as findings (not tu
 - Observed SPI-12→SRI-12 propagation lags (frozen, 167 catchments) concentrate at 0–1 months (median 1; 150/167), with the mean |SRI−SPI| diagnostic ≈ 0.4–0.7 — far from the ≈0.013 Machhar-type coupling-artefact signature, confirming the observed benchmark is fit for the H3 comparison.
 
 ### 5.2 H2 verdict: GR4J vs GR6J structural divergence (observed forcings, base case)
+
+![**Figure 4.** H2: per-catchment GR6J minus GR4J divergence on observed forcings, by aridity tercile. Whole-flow logNSE is immaterial (median -0.01 to 0.05, p = 0.41-0.45) and omitted; the low-flow bias metrics diverge strongly, most of all in dry catchments (7-day minimum median -449 pp). Pseudo-log scale compresses the near-zero-denominator outliers.](figures/fig4_h2_structural_divergence.png){width=100%}
 
 GR6J was calibrated under the identical-treatment rule (192 catchments calibrated under both structures; median validation KGE 0.527 vs GR4J 0.543, paired Wilcoxon p = 0.45 — the structures are comparable at the whole-flow level, so the low-flow comparison is the informative one). Low-flow metrics were computed for both structures on observed forcings (172 paired catchments, evaluation window 2001–2014).
 
@@ -182,6 +190,8 @@ logNSE is **not** materially divergent anywhere — the structures differ in *wh
 
 ### 5.3 H3 verdict: drought-propagation reproduction (Phase 3)
 
+![**Figure 5.** H3: observed SPI-12 to SRI-12 propagation lags (top, frozen for 167 catchments) and per-model reproduction of the observed lag distribution (bottom). All 22 models sit above the pre-registered 0.80 falsification band (propagation share 0.91-0.96), yet forcing rank is uncorrelated with propagation skill (rho = -0.350).](figures/fig5_h3_propagation.png){width=100%}
+
 SPI-12→SRI-12 propagation was computed for all 22 models (corrected-forcing SPI-12; full-period GR4J-simulated SRI-12, 1982–2014) against the **frozen** observed lags, with the pre-registered reproduction band `|L_model − L_obs| ≤ 1 month` and the pre-registered three-clause falsification rule (`PROP_PRE_REGISTRATION.md`, dated before any model SRI was computed).
 
 **H3 STANDS** (verdict file: `data_processed/prop/h3_verdict.md`) — with a structure that matters for the selection story:
@@ -194,6 +204,8 @@ SPI-12→SRI-12 propagation was computed for all 22 models (corrected-forcing SP
 **Implication carried forward to Objective 4:** because clause 3 fails, the drought-propagation criterion enters the selection test as a distinct dimension, not a corollary of forcing rank — models near-universal on the frozen band but unrankable by mean-flow skill is precisely the case the two-stage + propagation framework was built to separate.
 
 ### 5.4 H5 verdict: the CAMELS-IND-Proj LSTM benchmark audited at low flows (Phase 5, executed 19 Nov 2026)
+
+![**Figure 7.** H5: share of catchments where the CAMELS-IND-Proj LSTM (cross-model median) beats the corresponding calibrated structure. The LSTM wins the magnitude metrics (logNSE 0.86/0.88, low-flow volume 0.92/0.95, 7-day minimum 0.81/0.78, Q95 0.71/0.71 against GR4J/GR6J) but loses drought-duration fidelity (dry-spell 0.39). Number of catchments per metric shown above the bars.](figures/fig7_h5_lstm_win_rates.png){width=100%}
 
 Track B (CAMELS-IND-Proj, Singh et al. 2026 [@singh2026scidata], Zenodo 21775597) was ingested as the **benchmark object only** — never substrate, LSTM series never treated as observed. The archive was verified by CRC test (30,751 files, 35.3 GB unpacked) and its structure discovered from the data: 13 GCMs × 5 scenarios, one aggregate streamflow table per GCM × scenario (472 catchments, daily, cumecs), converted to mm/day with the same CAMELS-IND catchment areas used by GR4J/GR6J — a conversion validated against the observed record (median LSTM/observed mean-flow ratio 1.17, hard-gated in `BENCH_00`).
 
@@ -221,6 +233,8 @@ The aridity split supports the pre-registered suspicion in its expected directio
 **Implications carried forward:** (i) H4's decomposition remains necessary — a benchmark that wins magnitudes but loses drought duration cannot arbitrate drought-projection uncertainty on its own; (ii) the SSP-phase comparison (our GR4J/GR6J projections vs the benchmark's 2015–2100 envelope, already cached as per-SSP window summaries in `bench_lstm_proj_lowflow.csv`) now has a like-for-like GCM basis; (iii) the framework's two-track discipline is vindicated rather than merely asserted — the benchmark was usable *because* it was treated as an audit object, not as substrate.
 
 ### 5.5 H4 verdict: GCM × structure × tail-policy decomposition of projected low-flow variance (Phase 4, executed 23 Nov 2026)
+
+![**Figure 6.** H4: mean variance shares of the seven-term exact partition (GCM, structure, tail policy, three two-way interactions, 3-way), per low-flow indicator and aridity tercile, averaged over 192 catchments, four SSPs and three windows. Structure owns 34-68% of low-flow variance and exceeds GCM choice in dry catchments; mean flow is GCM-dominated (about 95%); the bias-correction tail policy contributes at most 0.5%.](figures/fig6_h4_variance_decomposition.png){width=100%}
 
 The decomposition runs on the projection layer assembled 23 Nov 2026 (`DECOMP_10`, `metric_version v1_proj`): **192** catchments calibrated under both structures (64/64/64 aridity terciles), driven with each corrected SSP forcing under the calibrated GR4J **and** GR6J parameters, five always-defined low-flow indicators, three future windows (2021–2040, 2041–2060, 2082–2100; the 2061–2080 archive gap excluded, never interpolated), **14/13/13/14** GCMs (HadGEM3-GC31-MM unpublished for ssp245/ssp370 — logged, never padded). **11,520** ANOVA cells (192 × 5 metrics × 4 SSPs × 3 windows); 11,514 decomposed, 6 dropped (one catchment's `lf_ratio_q95` is zero-variance in six cells — logged in `h4_dropped_cells.csv`). Per the design note in §4.2, the per-cell factorial is **saturated** (residual df = 0): every number below is an exact variance partition, and the inference is the pre-registered rule plus a 1,000-resample catchment bootstrap (seed 20261118), not per-cell significance tests.
 

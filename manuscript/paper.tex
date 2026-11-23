@@ -50,6 +50,21 @@
 \makeatletter
 \patchcmd\longtable{\par}{\if@noskipsec\mbox{}\fi\par}{}{}
 \makeatother
+\usepackage{graphicx}
+\makeatletter
+\newsavebox\pandoc@box
+\newcommand*\pandocbounded[1]{% scales image to fit in text height/width
+  \sbox\pandoc@box{#1}%
+  \Gscale@div\@tempa{\textheight}{\dimexpr\ht\pandoc@box+\dp\pandoc@box\relax}%
+  \Gscale@div\@tempb{\linewidth}{\wd\pandoc@box}%
+  \ifdim\@tempb\p@<\@tempa\p@\let\@tempa\@tempb\fi% select the smaller of both
+  \ifdim\@tempa\p@<\p@\scalebox{\@tempa}{\usebox\pandoc@box}%
+  \else\usebox{\pandoc@box}%
+  \fi%
+}
+% Set default figure placement to htbp
+\def\fps@figure{htbp}
+\makeatother
 % definitions for citeproc citations
 \NewDocumentCommand\citeproctext{}{}
 \NewDocumentCommand\citeproc{mm}{%
@@ -571,6 +586,24 @@ selection logic, and the application.
 
 \subsection{4. Methods}\label{methods}
 
+\begin{figure}
+\centering
+\includegraphics[width=1\linewidth,height=\textheight,keepaspectratio,alt={Figure
+1. The two-stage, low-flow-aware selection framework. Stage 1 selects
+GCMs on out-of-sample forcing skill; stage 2 drives the calibrated GR4J
+and GR6J structures with the corrected SSP forcings and evaluates
+low-flow metrics; the five hypotheses are tested as decision gates
+(H1--H3, H5 on the historical/discharge level, H4 on the projection
+layer). Aridity terciles stratify every
+claim.}]{figures/fig1_framework.png}
+\caption{\textbf{Figure 1.} The two-stage, low-flow-aware selection
+framework. Stage 1 selects GCMs on out-of-sample forcing skill; stage 2
+drives the calibrated GR4J and GR6J structures with the corrected SSP
+forcings and evaluates low-flow metrics; the five hypotheses are tested
+as decision gates (H1--H3, H5 on the historical/discharge level, H4 on
+the projection layer). Aridity terciles stratify every claim.}
+\end{figure}
+
 \subsubsection{4.1 Historical leg
 (complete)}\label{historical-leg-complete}
 
@@ -717,6 +750,24 @@ in §5.1--5.4; O4 pending,
 
 \subsubsection{4.3 SSP projection leg (the substrate for
 O4)}\label{ssp-projection-leg-the-substrate-for-o4}
+
+\begin{figure}
+\centering
+\includegraphics[width=1\linewidth,height=\textheight,keepaspectratio,alt={Figure
+2. Data flow and roster discipline. The raw SSP archive (10,692 netCDF
+files; no 2061--2080 files) is aggregated to 162 of 168 model × SSP ×
+variable combos, corrected under both tail policies, simulated with both
+structures (124,416 simulations) and reduced to 622,080 metric rows
+analysed as 11,514 saturated ANOVA cells. The roster funnel (472 → 242 →
+192 → 172/78/167) is stated, never padded.}]{figures/fig2_dataflow.png}
+\caption{\textbf{Figure 2.} Data flow and roster discipline. The raw SSP
+archive (10,692 netCDF files; no 2061--2080 files) is aggregated to 162
+of 168 model × SSP × variable combos, corrected under both tail
+policies, simulated with both structures (124,416 simulations) and
+reduced to 622,080 metric rows analysed as 11,514 saturated ANOVA cells.
+The roster funnel (472 → 242 → 192 → 172/78/167) is stated, never
+padded.}
+\end{figure}
 
 Two notebooks, parallel to the historical chain and leaving every
 \texttt{QED\_*}/\texttt{HYD\_*} notebook untouched.
@@ -866,6 +917,21 @@ Hybrid & Model & QED & DIS & mean PBIAS {[}\%{]} \\
 executed 18 Nov
 2026)}\label{h1-verdict-forcing-rank-vs-low-flow-rank-phase-1-executed-18-nov-2026}
 
+\begin{figure}
+\centering
+\includegraphics[width=1\linewidth,height=\textheight,keepaspectratio,alt={Figure
+3. H1: forcing-skill rank versus low-flow-skill rank for the 22
+all-variable CMIP6 models. The fitted line is flat (Spearman rho =
+-0.027, 95\% CI {[}-0.095, 0.038{]}); the dashed diagonal marks perfect
+rank agreement. The pre-registered failure threshold (rho \textgreater{}
+0.6) is far away.}]{figures/fig3_h1_rank_divergence.png}
+\caption{\textbf{Figure 3.} H1: forcing-skill rank versus low-flow-skill
+rank for the 22 all-variable CMIP6 models. The fitted line is flat
+(Spearman rho = -0.027, 95\% CI {[}-0.095, 0.038{]}); the dashed
+diagonal marks perfect rank agreement. The pre-registered failure
+threshold (rho \textgreater{} 0.6) is far away.}
+\end{figure}
+
 The low-flow metric layer (\texttt{metric\_version\ v1}, pre-registered)
 was computed for all 22 models on the full calibrated roster (192
 catchments × 22 models = 21,120 metric rows, evaluation window
@@ -909,6 +975,23 @@ Two mechanistic observations from the metric layer, reported as findings
 \subsubsection{5.2 H2 verdict: GR4J vs GR6J structural divergence
 (observed forcings, base
 case)}\label{h2-verdict-gr4j-vs-gr6j-structural-divergence-observed-forcings-base-case}
+
+\begin{figure}
+\centering
+\includegraphics[width=1\linewidth,height=\textheight,keepaspectratio,alt={Figure
+4. H2: per-catchment GR6J minus GR4J divergence on observed forcings, by
+aridity tercile. Whole-flow logNSE is immaterial (median -0.01 to 0.05,
+p = 0.41-0.45) and omitted; the low-flow bias metrics diverge strongly,
+most of all in dry catchments (7-day minimum median -449 pp). Pseudo-log
+scale compresses the near-zero-denominator
+outliers.}]{figures/fig4_h2_structural_divergence.png}
+\caption{\textbf{Figure 4.} H2: per-catchment GR6J minus GR4J divergence
+on observed forcings, by aridity tercile. Whole-flow logNSE is
+immaterial (median -0.01 to 0.05, p = 0.41-0.45) and omitted; the
+low-flow bias metrics diverge strongly, most of all in dry catchments
+(7-day minimum median -449 pp). Pseudo-log scale compresses the
+near-zero-denominator outliers.}
+\end{figure}
 
 GR6J was calibrated under the identical-treatment rule (192 catchments
 calibrated under both structures; median validation KGE 0.527 vs GR4J
@@ -955,6 +1038,22 @@ falsification rule the structural axis cannot be dropped from Objective
 
 \subsubsection{5.3 H3 verdict: drought-propagation reproduction (Phase
 3)}\label{h3-verdict-drought-propagation-reproduction-phase-3}
+
+\begin{figure}
+\centering
+\includegraphics[width=1\linewidth,height=\textheight,keepaspectratio,alt={Figure
+5. H3: observed SPI-12 to SRI-12 propagation lags (top, frozen for 167
+catchments) and per-model reproduction of the observed lag distribution
+(bottom). All 22 models sit above the pre-registered 0.80 falsification
+band (propagation share 0.91-0.96), yet forcing rank is uncorrelated
+with propagation skill (rho =
+-0.350).}]{figures/fig5_h3_propagation.png}
+\caption{\textbf{Figure 5.} H3: observed SPI-12 to SRI-12 propagation
+lags (top, frozen for 167 catchments) and per-model reproduction of the
+observed lag distribution (bottom). All 22 models sit above the
+pre-registered 0.80 falsification band (propagation share 0.91-0.96),
+yet forcing rank is uncorrelated with propagation skill (rho = -0.350).}
+\end{figure}
 
 SPI-12→SRI-12 propagation was computed for all 22 models
 (corrected-forcing SPI-12; full-period GR4J-simulated SRI-12,
@@ -1004,6 +1103,23 @@ separate.
 \subsubsection{5.4 H5 verdict: the CAMELS-IND-Proj LSTM benchmark
 audited at low flows (Phase 5, executed 19 Nov
 2026)}\label{h5-verdict-the-camels-ind-proj-lstm-benchmark-audited-at-low-flows-phase-5-executed-19-nov-2026}
+
+\begin{figure}
+\centering
+\includegraphics[width=1\linewidth,height=\textheight,keepaspectratio,alt={Figure
+7. H5: share of catchments where the CAMELS-IND-Proj LSTM (cross-model
+median) beats the corresponding calibrated structure. The LSTM wins the
+magnitude metrics (logNSE 0.86/0.88, low-flow volume 0.92/0.95, 7-day
+minimum 0.81/0.78, Q95 0.71/0.71 against GR4J/GR6J) but loses
+drought-duration fidelity (dry-spell 0.39). Number of catchments per
+metric shown above the bars.}]{figures/fig7_h5_lstm_win_rates.png}
+\caption{\textbf{Figure 7.} H5: share of catchments where the
+CAMELS-IND-Proj LSTM (cross-model median) beats the corresponding
+calibrated structure. The LSTM wins the magnitude metrics (logNSE
+0.86/0.88, low-flow volume 0.92/0.95, 7-day minimum 0.81/0.78, Q95
+0.71/0.71 against GR4J/GR6J) but loses drought-duration fidelity
+(dry-spell 0.39). Number of catchments per metric shown above the bars.}
+\end{figure}
 
 Track B (CAMELS-IND-Proj, Singh et al.~2026
 (\citeproc{ref-singh2026scidata}{{Singh et al.} 2026}), Zenodo 21775597)
@@ -1099,6 +1215,25 @@ vindicated rather than merely asserted --- the benchmark was usable
 \subsubsection{5.5 H4 verdict: GCM × structure × tail-policy
 decomposition of projected low-flow variance (Phase 4, executed 23 Nov
 2026)}\label{h4-verdict-gcm-structure-tail-policy-decomposition-of-projected-low-flow-variance-phase-4-executed-23-nov-2026}
+
+\begin{figure}
+\centering
+\includegraphics[width=1\linewidth,height=\textheight,keepaspectratio,alt={Figure
+6. H4: mean variance shares of the seven-term exact partition (GCM,
+structure, tail policy, three two-way interactions, 3-way), per low-flow
+indicator and aridity tercile, averaged over 192 catchments, four SSPs
+and three windows. Structure owns 34-68\% of low-flow variance and
+exceeds GCM choice in dry catchments; mean flow is GCM-dominated (about
+95\%); the bias-correction tail policy contributes at most
+0.5\%.}]{figures/fig6_h4_variance_decomposition.png}
+\caption{\textbf{Figure 6.} H4: mean variance shares of the seven-term
+exact partition (GCM, structure, tail policy, three two-way
+interactions, 3-way), per low-flow indicator and aridity tercile,
+averaged over 192 catchments, four SSPs and three windows. Structure
+owns 34-68\% of low-flow variance and exceeds GCM choice in dry
+catchments; mean flow is GCM-dominated (about 95\%); the bias-correction
+tail policy contributes at most 0.5\%.}
+\end{figure}
 
 The decomposition runs on the projection layer assembled 23 Nov 2026
 (\texttt{DECOMP\_10}, \texttt{metric\_version\ v1\_proj}): \textbf{192}

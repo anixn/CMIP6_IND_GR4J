@@ -1,0 +1,19 @@
+flowchart LR
+    P["<b>The problem</b><br/>Which CMIP6 models are fit for<br/>low-flow and drought projection?<br/>Forcing skill is the usual answer"] --> F1["<b>Low-flow-aware selection</b><br/>two-stage, out-of-sample<br/>22 GCMs → 14 shortlist<br/>192 catchments · GR4J + GR6J"]
+
+    F1 --> R1["<b>H1</b> ranks orthogonal<br/>ρ = −0.027<br/>one-stage selection fails"]
+    F1 --> R2["<b>H2</b> structures diverge<br/>dry 7-day min −449 pp<br/>whole-flow KGE identical"]
+    F1 --> R3["<b>H3</b> propagation reproduced<br/>share 0.91–0.96<br/>mean-flow selection misses it"]
+    F1 --> R4["<b>H4</b> variance decomposition<br/>structure 34–68 % in dry<br/>GCM 95 % for mean flow<br/>tail policy ≤ 0.5 %"]
+    F1 --> R5["<b>H5</b> LSTM audit<br/>wins magnitudes 0.71–0.95<br/>loses drought duration 0.39"]
+
+    R1 --> M["<b>Message</b><br/>Select models in hydrological space,<br/>at low flows, out of sample —<br/>and report which uncertainty<br/>axis actually matters where"]
+
+    classDef prob fill:#f4e7e7,stroke:#8a2b2b,color:#3d1010
+    classDef frame fill:#e8f1fa,stroke:#1f4e79,color:#0d2b45
+    classDef res fill:#eaf5ea,stroke:#2e6b2e,color:#123d12
+    classDef msg fill:#fdf1e0,stroke:#a6611a,color:#4a2c07
+    class P prob
+    class F1 frame
+    class R1,R2,R3,R4,R5 res
+    class M msg

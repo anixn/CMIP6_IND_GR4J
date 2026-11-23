@@ -1,0 +1,32 @@
+flowchart TB
+    subgraph S1["Stage 1 &mdash; forcing (QED_00–30)"]
+        A["CMIP6 historical<br/>22 all-variable GCMs<br/>1981–2014"] --> B["Seasonal empirical<br/>quantile mapping<br/>fit 1981–2000"]
+        B --> C["Out-of-sample forcing skill<br/>score 2001–2014<br/>KGE / NSE / PBIAS"]
+        C --> D["Hybrid shortlist<br/>14 GCMs (ECS span)"]
+    end
+
+    subgraph S2["Stage 2 &mdash; hydrology (HYD_20/30, GR6J_20)"]
+        D --> E["SSP forcings<br/>14 GCMs × 4 SSPs<br/>linear | constant tail"]
+        E --> F["EQM apply<br/>policy-scoped trees"]
+        F --> G1["GR4J<br/>192 catchments"]
+        F --> G2["GR6J<br/>192 catchments"]
+        G1 --> H["Low-flow metrics<br/>logNSE · Q95 · mam7<br/>volume · dry-spell"]
+        G2 --> H
+    end
+
+    subgraph S3["Selection (H1–H3, H5) and decomposition (H4)"]
+        H --> I{"H1 rank divergence<br/>forcing vs low-flow<br/>ρ = −0.027 [−0.095, 0.038]"}
+        H --> J{"H2 structural divergence<br/>GR4J vs GR6J<br/>dry 7-day min −449 pp"}
+        H --> K{"H3 propagation<br/>SPI-12 → SRI-12<br/>share 0.91–0.96"}
+        S2 --> L["LSTM benchmark<br/>CAMELS-IND-Proj<br/>audit, not substrate"]
+        L --> M{"H5 win-rate split<br/>magnitudes 0.71–0.95<br/>duration 0.39"}
+        D --> N["Three-factor ANOVA<br/>GCM × structure × tail policy<br/>11,520 saturated cells"]
+        N --> O{"H4 variance shares<br/>structure 34–68 %<br/>dry tercile, low-flow metrics"}
+    end
+
+    classDef data fill:#e8f1fa,stroke:#1f4e79,color:#0d2b45
+    classDef model fill:#eaf5ea,stroke:#2e6b2e,color:#123d12
+    classDef hypo fill:#fdf1e0,stroke:#a6611a,color:#4a2c07
+    class A,B,C,E,F data
+    class D,G1,G2,H,L,N model
+    class I,J,K,M,O hypo
