@@ -132,7 +132,9 @@ executed 23 Nov 2026 (\texttt{data\_processed/decomp/h4\_verdict.md}, H4
 STANDS).} Novelty framing and the H4 ANOVA specification are governed by
 \texttt{manuscript/NOVELTY\_AND\_ANOVA\_SPEC.md} (v2, 23 Nov 2026).
 Points needing the full literature survey are marked \textbf{{[}TODO:
-survey{]}}.
+survey{]}} --- resolved 23 Nov 2026: the survey is complete and in
+\texttt{manuscript/LITERATURE\_SURVEY.md} (see §9 for the remaining
+camera-ready items).
 \end{quote}
 
 \begin{center}\rule{0.5\linewidth}{0.5pt}\end{center}
@@ -180,10 +182,82 @@ catchments (66--68\% of variance for Q95 and 7-day minima, versus
 the variance-level confirmation that mean-flow-based selection cannot
 arbitrate low-flow projection uncertainty.
 
-\subsection{1. Objective framing}\label{objective-framing}
+\subsection{1. Introduction and objective
+framing}\label{introduction-and-objective-framing}
 
-\textbf{Headline claim (spec v2 §1 --- use verbatim or near-verbatim;
-the rest of the paper is supporting evidence for this sentence):}
+\textbf{Motivation.} Peninsular India's water security is decided in the
+dry season: irrigation demand, drinking-water supply, hydropower and
+environmental flows all ride on low flows, and the Drought Atlas of
+India shows meteorological drought already pervasive over the peninsula
+(\citeproc{ref-chuphal2024droughtatlas}{Chuphal et al. 2024}). Climate
+projections for the region are available at scale --- bias-corrected
+CMIP6 ensembles for South Asia
+(\citeproc{ref-mishra2020biascorrected}{Mishra et al. 2020}),
+observation-constrained projections of Indian river flows
+(\citeproc{ref-chuphal2026obsconstrained}{Chuphal and Mishra 2026}), and
+India-wide streamflow projections from multi-model hydrology
+(\citeproc{ref-sharma2026hp}{Sharma et al. 2026}) --- and the first
+large-sample hydrological dataset for the region, CAMELS-IND, now covers
+472 catchments with 1981--2014 daily records
+(\citeproc{ref-mangukiya2025camelsind}{{Mangukiya et al.} 2025}). Yet
+none of these products tells a water manager \emph{which CMIP6 models
+are fit for low-flow projection}, and the projection products themselves
+are not low-flow-aware: Sharma et al.~(2026) note that ``uncertainty
+existed for low flow events'' but do not formalise it; the LSTM
+projections of CAMELS-IND-Proj (\citeproc{ref-singh2026scidata}{{Singh
+et al.} 2026}) were never audited at low flows by an independent
+process-based user.
+
+\textbf{The selection problem.} Three selection practices dominate the
+literature, and all three target the wrong response variable for drought
+projection. First, \emph{forcing-based selection} --- ranking models on
+how well their corrected precipitation and temperature match
+observations --- is the default in India and elsewhere; the closest
+Indian precedents select GCMs by skill metrics for single basins
+(\citeproc{ref-naresh2026papagni}{Naresh and Mathew 2026}) or screen
+them for basin response before hydrological modelling (Krishna basin; J.
+Water Clim. Change 15(2), 476) but never test whether that skill carries
+to low flows. Second, \emph{mean-flow-based hydrological evaluation} ---
+the whole-flow KGE/NSE ranking used by Sharma et al.~(2026) --- scores
+the part of the hydrograph where climate models are already consistent,
+not the recession limbs where models disagree most. Third,
+\emph{deep-learning surrogates} --- LSTM projections trained on large
+samples (\citeproc{ref-kratzert2018lstm}{Kratzert et al. 2018},
+\citeproc{ref-kratzert2019regional}{2019}) --- inherit the same blind
+spots unless audited: the best-practice literature itself insists LSTMs
+be trained across many basins and evaluated process-wise
+(\citeproc{ref-kratzert2024nevertrain}{Kratzert et al. 2024}), and low
+flows are precisely where conceptual structures and LSTM surrogates are
+known to differ (\citeproc{ref-pushpalatha2011gr6j}{Pushpalatha et al.
+2011}).
+
+\textbf{The gap.} What is missing is a selection framework that (i)
+evaluates models \emph{in hydrological space}, out of sample, on
+\textbf{low-flow-specific} metrics; (ii) separates the uncertainty a
+selection decision can control --- which climate model, which
+hydrological structure, which bias-correction tail design --- from the
+uncertainty it cannot; (iii) respects drought \emph{propagation}, the
+storage-controlled process that turns rainfall deficits into streamflow
+deficits (\citeproc{ref-barker2016propagation}{Barker et al. 2016}); and
+(iv) works at large-sample scale over India, where hard-rock,
+monsoon-dominated catchments are the rule rather than the exception.
+Uncertainty decomposition of hydrological projections is established
+methodology --- ANOVA over GCM × emission-scenario × hydrological-model
+factors has been applied in Korea (\citeproc{ref-park2025jhrs}{Park et
+al. 2025}; \citeproc{ref-kimchung2026hess}{Kim and Chung 2026}) and the
+Mediterranean (\citeproc{ref-senatore2022med}{Senatore et al. 2022}) ---
+but no prior decomposition treats \textbf{bias-correction tail design}
+as a first-order factor alongside GCM and hydrological structure, and
+none runs on Indian catchments with a low-flow metric layer. Tail
+behaviour is a documented first-order sensitivity of quantile mapping
+(\citeproc{ref-cannon2015qm}{Cannon et al. 2015};
+\citeproc{ref-themessl2012ecc}{Themeßl et al. 2012};
+\citeproc{ref-gudmundsson2012eqm}{Gudmundsson et al. 2012}); whether it
+matters \emph{for low flows} is an empirical question the decomposition
+answers.
+
+\textbf{Headline claim (spec v2 §1 --- verbatim or near-verbatim;
+everything else is supporting evidence):}
 
 \begin{quote}
 We present the first low-flow-aware CMIP6 model-selection framework for
@@ -278,12 +352,14 @@ selection + three-factor decomposition --- and is stated as such so no
 reviewer reads the paper as claiming a new method: the ANOVA (Park et
 al.~2025 (\citeproc{ref-park2025jhrs}{Park et al. 2025}); Kim \& Chung
 2026 (\citeproc{ref-kimchung2026hess}{Kim and Chung 2026}); Senatore et
-al.~2022 (\citeproc{ref-senatore2022med}{{Senatore et al.} 2022})), the
+al.~2022 (\citeproc{ref-senatore2022med}{Senatore et al. 2022})), the
 low-flow metrics and the SPI/SRI index are borrowed; the axes, the
 selection logic and the application are new (§2 concedes this in the
 same table).
 
-\subsection{2. Prior-art positioning}\label{prior-art-positioning}
+\subsection{\texorpdfstring{2. Prior-art positioning (verified 23 Nov
+2026 --- full survey in
+\texttt{LITERATURE\_SURVEY.md})}{2. Prior-art positioning (verified 23 Nov 2026 --- full survey in LITERATURE\_SURVEY.md)}}\label{prior-art-positioning-verified-23-nov-2026-full-survey-in-literature_survey.md}
 
 {\def\LTcaptype{none} % do not increment counter
 \begin{longtable}[]{@{}
@@ -294,7 +370,7 @@ same table).
 \begin{minipage}[b]{\linewidth}\raggedright
 Group / product
 \end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
-What they own
+What they own (verified)
 \end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
 Why our lane survives
 \end{minipage} \\
@@ -311,41 +387,59 @@ forcing-vs-low-flow divergence test, no propagation-time selection, no
 uncertainty decomposition. They note ``uncertainty existed for low flow
 events'' but do not formalise it --- we do \\
 \textbf{Park, Kim, Sung \& Chung 2025 (\citeproc{ref-park2025jhrs}{Park
-et al. 2025})} (\emph{J. Hydrol.: Reg. Stud.} 62:102991,
-doi:10.1016/j.ejrh.2025.102991) & ANOVA of uncertainty contributions to
-hydrologic drought projection, South Korea & \textbf{Method borrowed ---
-conceded here and in §4.2}; Korea not India; no GR4J/GR6J axis; no
-tail-policy factor. \emph{(exact factor list verified at
-camera-ready)} \\
-\textbf{NA} (\emph{HESS} 30:227--247, doi:10.5194/hess-30-227-2026) &
-ANOVA of GCM × SSP × calibration-condition × calibration-length for
-future drought, South Korea (SWAT, SDI, 20 CMIP6 GCMs; GCM
-\textgreater{} 60\% for runoff; calibration-related 3.9--9.8\%) &
+et al. 2025})} (\emph{J. Hydrol.: Reg. Stud.} 62:102991, open access) &
+ANOVA of climate-projection + hydrologic-modelling uncertainty on
+\textbf{low flows and drought characteristics} in three Korean reservoir
+basins; hydrologic models \textbf{GR4J, GR6J, SWAT}; model selection
+explains \textbf{51.9 / 21.9 / 50.5 \%} of projected low-flow variance
+(site-dependent), 5.6--12.4 \% for drought-event characteristics; GCM
+dominant for runoff & \textbf{Method borrowed --- conceded here and in
+§4.2.} Their result \emph{corroborates} our H4 (structure 34--68 \%),
+which we state. Differentiation: 3 basins vs \textbf{192}
+(aridity-stratified, catchment-bootstrap CIs); Korea not Peninsular
+India; \textbf{no bias-correction tail-design factor}; no
+forcing-vs-low-flow \textbf{rank-divergence test}; no
+propagation-selection dimension; no LSTM audit \\
+\textbf{Kim \& Chung 2026 (\citeproc{ref-kimchung2026hess}{Kim and Chung
+2026})} (\emph{HESS} 30:227--247, open access) & ANOVA \textbf{with
+replication} (3,600 combos): 20 CMIP6 GCMs × 3 SSPs × SWAT × calibration
+conditions (SDI) × calibration length (1--20 y), four Korean dam basins;
+\textbf{GCM dominant}; hydrologic-model calibration contributes
+\textbf{3.9--9.8 \%} (runoff; largest in low-runoff periods) and 2.7 \%
+(drought); \textbf{3-way interactions excluded} as hard to interpret &
 \textbf{Method borrowed; single structure (SWAT) so no structural axis;
-no bias-correction factor.} Cited in §2 \emph{and} §4.2 --- HESS is a
-target journal and its reviewers will know this paper \\
-NA (Mediterranean ANOVA of GCM + bias correction) \emph{(full citation
-verified at camera-ready)} & ANOVA with bias-correction method as a
-factor & Method borrowed; not India, no GR4J/GR6J axis, not
-catchment-scale 192 --- which is why P4's claim says \textbf{``tail
+no bias-correction factor; no low-flow metric layer.} Cited in §2
+\emph{and} §4.2 --- HESS is a target journal and its reviewers will know
+this paper. Our saturated design \emph{reports} the 3-way term because
+the partition is exact --- a methodological contrast worth one sentence
+in §6 \\
+\textbf{Senatore, Fuoco, Maiolo, Mendicino, Smiatek \& Kunstmann 2022
+(\citeproc{ref-senatore2022med}{Senatore et al. 2022})} (\emph{J.
+Hydrol.: Reg. Stud.} 42:101120, open access) & ANOVA of 15 EURO-CORDEX
+GCM-RCM members × \textbf{3 bias-correction methods} (60 simulations),
+Crati basin (Italy); \textbf{GCM primary}; BC ``smooths'' projected
+impacts (runoff reduction \textasciitilde3 \% smaller with BC) & Method
+borrowed; single catchment; BC as \emph{methods}, not the
+\textbf{tail/extrapolation design} of one method; not low-flow-specific;
+no GR4J/GR6J axis --- which is why P4's claim says \textbf{``tail
 design''}, never ``bias correction'' generically \\
 \textbf{Cannon, Sobie \& Murdock 2015
-(\citeproc{ref-cannon2015qm}{Cannon et al. 2015})} (\emph{J. Climate}
-28(17):6938--6959, doi:10.1175/JCLI-D-14-00754.1) + \textbf{Themeßl,
+(\citeproc{ref-cannon2015qm}{Cannon et al. 2015})} + \textbf{Themeßl,
 Gobiet \& Heinrich 2012 (\citeproc{ref-themessl2012ecc}{Themeßl et al.
-2012})} (\emph{Climatic Change} 112(2):449--468) &
+2012})} + \textbf{Gudmundsson et al.~2012
+(\citeproc{ref-gudmundsson2012eqm}{Gudmundsson et al. 2012})} &
 Quantile-mapping/error-correction choices materially alter extremes and
-the climate-change signal & Not competitors --- the
-\textbf{methodological anchors for the \texttt{tail\_policy} factor}
+the climate-change signal; EQM at station scale & Not competitors ---
+the \textbf{methodological anchors for the \texttt{tail\_policy} factor}
 (cited in §4.2/§4.3). The 23 Nov EQM defect (a drizzle-interval slope
 turning 60 mm/d into 4.0×10⁹ mm/d pre-fix) is a concrete instance of
 exactly the failure class Cannon documents \\
-Liu et al.~2025 (\citeproc{ref-liu2025atmosphere}{{Liu et al.} 2025})
-(\emph{Atmosphere} 16(6):691, doi:10.3390/atmos16060691 --- journal
-corrected 23 Nov 2026, previously mis-cited as ``Climate'') & CMIP6
-selection + streamflow + hydrological drought (SWAT+MODFOOD) &
+\textbf{Liu, Liu, Si, Wang, Zhao \& Wang 2025
+(\citeproc{ref-liu2025atmosphere}{Liu et al. 2025})} (\emph{Atmosphere}
+16(6):691 --- author list verified) & SWAT + MODFLOW coupled CMIP6
+projections; runoff and SRI-3 hydrological drought, two scenarios &
 Single-basin scale; no 192-catchment out-of-sample rank; no
-rank-divergence test. \emph{(complete author list at camera-ready)} \\
+rank-divergence test; no decomposition \\
 \textbf{India Drought Monitor + Drought Atlas of India} (Chuphal et
 al.~2024 (\citeproc{ref-chuphal2024droughtatlas}{Chuphal et al. 2024}),
 \emph{Sci. Data}; IITGN) + bias-corrected CMIP6 South Asia (Mishra et
@@ -356,47 +450,80 @@ drought at catchment scale; bias correction not catchment-tuned, not
 seasonally stratified, not hydrologically evaluated, not out-of-sample
 ranked \\
 \textbf{CAMELS-IND} (Mangukiya et al.~2025
-(\citeproc{ref-mangukiya2025camelsind}{{Mangukiya et al.} 2025}), ESSD)
-+ \textbf{CAMELS-IND-Proj} (Singh et al.~2026
-(\citeproc{ref-singh2026camelsindproj}{Singh et al. 2026}), Zenodo
-21775597) + MARRMoT adequacy benchmark (Mangukiya et al.~2026
-(\citeproc{ref-mangukiya2026wrr}{{Mangukiya et al.} 2026}), WRR) &
-Datasets; regional LSTM projections (13 GCMs × 4 SSPs); model-adequacy
-benchmarking & No low-flow-aware analysis of their own product yet; LSTM
-dry tail unaudited; we are the first critical process-based user. GR4J
-is in their 5-model sufficient set (WRR 2026) --- independent support
-for our structural choice, cited as an ally, not a competitor \\
+(\citeproc{ref-mangukiya2025camelsind}{{Mangukiya et al.} 2025}),
+\emph{ESSD} 17:461) + \textbf{CAMELS-IND-Proj} (Singh et al.~2026
+(\citeproc{ref-singh2026scidata}{{Singh et al.} 2026}), \emph{Sci.
+Data}, doi:10.1038/s41597-026-08858-w; Zenodo 21775597) + model-adequacy
+benchmark (Mangukiya, Sahu, Gupta \& Sharma 2026
+(\citeproc{ref-mangukiya2026wrr}{{Mangukiya et al.} 2026}), \emph{WRR}
+62(7) e2026WR044753: \textbf{47 MARRMoT models, 159 Peninsular India
+watersheds}) & Datasets; regional LSTM projections (13 GCMs × 4 SSPs);
+large-sample model benchmarking & No low-flow-aware analysis of their
+own product yet; LSTM dry tail unaudited; we are the first critical
+process-based user. GR4J is in their 5-model sufficient set ---
+independent support for our structural choice, cited as an ally, not a
+competitor \\
 \textbf{India Drought Atlas operational ecosystem} (IITGN) & Monitoring
 infrastructure with institutional appetite & Our streamflow-drought
 layer is a candidate addition to that ecosystem (roadmap Phase 5), not a
 competitor to it \\
-Tiwary \& Mondal 2026 (EGU abstract) & Historical Q7min trends, 55
-minimally-regulated catchments & Historical description; ours is
+\textbf{Tiwary \& Mondal 2026} (EGU abstract) & Historical Q7min trends,
+55 minimally-regulated catchments & Historical description; ours is
 projections + selection + uncertainty \\
-Meresa et al.~2023; Wang et al.~2025 \emph{(full citations verified at
-camera-ready)} & CMIP6 drought propagation (Ireland; other) &
-Propagation analysis exists elsewhere; the \textbf{selection use} over
-Indian catchments is new (§4.2 states the index is borrowed) \\
+\textbf{Meresa, Donegan, Golian \& Murphy 2022
+(\citeproc{ref-meresa2022water}{Meresa et al. 2022})} (\emph{Water}
+14:1556, open access) + \textbf{Meresa, Murphy \& Donegan 2023
+(\citeproc{ref-meresa2023jgr}{Meresa et al. 2023})}
+(\emph{JGR-Atmospheres} 128, e2022JD038025) & GR4J-based \textbf{Q95
+low-flow} projections for 37 Irish catchments; drought propagation under
+climate change (standardised indices) & GR4J low-flow projection exists
+(Ireland) but with no GR6J axis, no selection framework, no
+decomposition; propagation analysis exists elsewhere --- the
+\textbf{selection use} over Indian catchments is new (§4.2 states the
+index is borrowed) \\
+\textbf{Barker, Hannaford, Chiverton \& Svensson 2016
+(\citeproc{ref-barker2016propagation}{Barker et al. 2016})} (\emph{HESS}
+20:2483--2505, cited by \textasciitilde711) & \textbf{Cross-correlation
+of standardised precipitation vs hydrological indices across 121 UK
+catchments}; catchment storage (baseflow index, fractured-rock \%)
+controls propagation & The methodological anchor for our H3 lag method
+(§4.2). Our hard-rock Peninsular catchments sit at the storage-poor end
+of exactly that gradient --- a physical explanation our Discussion
+develops \\
+Indian single-basin precedents: Krishna basin GCM selection (\emph{J.
+Water Clim. Change} 15(2):476; VERIFY authors), \textbf{Naresh \& Mathew
+2026 (\citeproc{ref-naresh2026papagni}{Naresh and Mathew 2026})}
+(\emph{J. Atmos. Solar-Terr. Phys.}; ML multi-model ensemble, Papagni
+basin), Betwa SWAT+CMIP6 (Singh et al., \emph{J. Water Clim. Change};
+VERIFY) & GCM selection / ML ensembles / projection for individual
+Indian basins & Single-basin, forcing-based or ML-based; no large-sample
+out-of-sample low-flow ranking; no structural axis; no decomposition \\
 \end{longtable}
 }
 
-\textbf{Conceded machinery (state once here, do not hide):} seasonal
-EQM, the low-flow metric suite (logNSE, Q95/mam7/volume/dry-spell
-biases), the SPI/SRI construction and the cross-correlation lag, and
-multi-way ANOVA variance decomposition are all standard or borrowed (NA;
-NA; NA). What is claimed as new is stated in §1: the axes, the selection
-logic, and the application.
+\textbf{Conceded machinery (state once here, do not hide):} seasonal EQM
+and its station-scale evaluation
+(\citeproc{ref-gudmundsson2012eqm}{Gudmundsson et al. 2012}), the
+low-flow metric suite (logNSE, Q95/mam7/volume/dry-spell biases), the
+SPI/SRI construction and the cross-correlation lag
+(\citeproc{ref-barker2016propagation}{Barker et al. 2016}), and
+multi-way ANOVA variance decomposition (\citeproc{ref-park2025jhrs}{Park
+et al. 2025}; \citeproc{ref-kimchung2026hess}{Kim and Chung 2026};
+\citeproc{ref-senatore2022med}{Senatore et al. 2022}) are all standard
+or borrowed. What is claimed as new is stated in §1: the axes, the
+selection logic, and the application.
 
 \subsection{3. Data}\label{data}
 
 \begin{itemize}
 \tightlist
 \item
-  \textbf{CAMELS-IND} (NA, ESSD 17:461; Zenodo 14999580): daily
-  catchment-mean forcings (pr, tasmax, tasmin), observed streamflow, 211
-  attributes, 472 catchments, 1981--2014 (12,418 days; forcings
-  complete). Area (\texttt{cwc\_area}, km²) and latitude
-  (\texttt{cwc\_lat}) from the topography file.
+  \textbf{CAMELS-IND} (Mangukiya et al.~2025
+  (\citeproc{ref-mangukiya2025camelsind}{{Mangukiya et al.} 2025}), ESSD
+  17:461; Zenodo 14999580): daily catchment-mean forcings (pr, tasmax,
+  tasmin), observed streamflow, 211 attributes, 472 catchments,
+  1981--2014 (12,418 days; forcings complete). Area (\texttt{cwc\_area},
+  km²) and latitude (\texttt{cwc\_lat}) from the topography file.
 \item
   \textbf{CMIP6 historical}: daily \texttt{pr}, \texttt{tasmax},
   \texttt{tasmin}, 24 models over the Indian domain; CESM2 and IITM-ESM
@@ -429,15 +556,17 @@ logic, and the application.
   ignored. A model × SSP × variable combo enters the pipeline only when
   all 66 years are present (§4.3).
 \item
-  \textbf{CAMELS-IND-Proj} (NA, Zenodo 21775597, CC BY 4.0; EcoHydro Lab
-  IIT Roorkee): daily LSTM streamflow 2015--2100, 13 GCMs × 4 SSPs,
-  historical-per-GCM runs and forcings included; \textasciitilde11.3 GB;
-  \texttt{filter\_catchment\_model\_scenario.py} for subsetting.
-  \textbf{Track B only.} The project brief's confidence-flag construct
-  was checked against the distributed archive and is \textbf{not present
-  in the data} (no flag/mask file; aggregate header is exactly
-  year/month/day + 472 gauge columns --- §5.4); the paper therefore does
-  not use it. \textbf{{[}TODO: survey{]}}
+  \textbf{CAMELS-IND-Proj} (Singh et al.~2026
+  (\citeproc{ref-singh2026scidata}{{Singh et al.} 2026}), \emph{Sci.
+  Data}, doi:10.1038/s41597-026-08858-w; Zenodo 21775597, CC BY 4.0;
+  EcoHydroX Lab IIT Roorkee): daily LSTM streamflow 2015--2100, 13 GCMs
+  × 4 SSPs, historical-per-GCM runs and forcings included;
+  \textasciitilde11.3 GB; \texttt{filter\_catchment\_model\_scenario.py}
+  for subsetting. \textbf{Track B only.} The project brief's
+  confidence-flag construct was checked against the distributed archive
+  and is \textbf{not present in the data} (no flag/mask file; aggregate
+  header is exactly year/month/day + 472 gauge columns --- §5.4); the
+  paper therefore does not use it.
 \end{itemize}
 
 \subsection{4. Methods}\label{methods}
@@ -571,7 +700,7 @@ in §5.1--5.4; O4 pending,
   \item
     \textbf{Multiplicity:} the decision rule is a disjunction over 180
     summary cells (3 terciles × 5 indicators × 4 SSPs × 3 windows);
-    noted as a limitation (§6).
+    noted as a limitation (§7).
   \item
     \textbf{Sensitivity (supplement, labelled):}
     \texttt{lmer(value\ \textasciitilde{}\ structure\ ×\ tail\_policy\ +\ (1\textbar{}gcm))}
@@ -716,9 +845,9 @@ Hybrid & Model & QED & DIS & mean PBIAS {[}\%{]} \\
 \item
   Absolute daily discharge skill is ≈0 for \emph{all} models (median KGE
   −0.05 to −0.11): CMIP6 historical runs are free-running; EQM corrects
-  distributions, not timing. Volume bias (PBIAS) and relative ordering
-  are the interpretable signals. \textbf{{[}TODO: QM-limits
-  literature{]}}
+  distributions, not timing
+  (\citeproc{ref-gudmundsson2012eqm}{Gudmundsson et al. 2012}). Volume
+  bias (PBIAS) and relative ordering are the interpretable signals.
 \item
   Volume-bias standouts: NorESM2-MM −4.3\%, HadGEM3-GC31-MM +0.4\%,
   MIROC6 +3.9\%, MPI-ESM1-2-HR +5.3\%.
@@ -876,15 +1005,16 @@ separate.
 audited at low flows (Phase 5, executed 19 Nov
 2026)}\label{h5-verdict-the-camels-ind-proj-lstm-benchmark-audited-at-low-flows-phase-5-executed-19-nov-2026}
 
-Track B (CAMELS-IND-Proj, NA, Zenodo 21775597) was ingested as the
-\textbf{benchmark object only} --- never substrate, LSTM series never
-treated as observed. The archive was verified by CRC test (30,751 files,
-35.3 GB unpacked) and its structure discovered from the data: 13 GCMs ×
-5 scenarios, one aggregate streamflow table per GCM × scenario (472
-catchments, daily, cumecs), converted to mm/day with the same CAMELS-IND
-catchment areas used by GR4J/GR6J --- a conversion validated against the
-observed record (median LSTM/observed mean-flow ratio 1.17, hard-gated
-in \texttt{BENCH\_00}).
+Track B (CAMELS-IND-Proj, Singh et al.~2026
+(\citeproc{ref-singh2026scidata}{{Singh et al.} 2026}), Zenodo 21775597)
+was ingested as the \textbf{benchmark object only} --- never substrate,
+LSTM series never treated as observed. The archive was verified by CRC
+test (30,751 files, 35.3 GB unpacked) and its structure discovered from
+the data: 13 GCMs × 5 scenarios, one aggregate streamflow table per GCM
+× scenario (472 catchments, daily, cumecs), converted to mm/day with the
+same CAMELS-IND catchment areas used by GR4J/GR6J --- a conversion
+validated against the observed record (median LSTM/observed mean-flow
+ratio 1.17, hard-gated in \texttt{BENCH\_00}).
 
 Two audit findings about the dataset itself, both logged in
 \texttt{data\_processed/bench/bench\_00\_log.txt}:
@@ -1073,9 +1203,161 @@ fixed-effects GCM share is +11.5 pp (95th \textbar difference\textbar{}
 65.1 pp), because the ICC-style share conditions only on GCM + residual
 variance while the fixed share partitions all variance including the
 large structure/tail effects. Both are reported; the fixed-effects
-partition remains primary (§6).
+partition remains primary (§7).
 
-\subsection{6. Limitations}\label{limitations}
+\subsection{6. Discussion}\label{discussion}
+
+\subsubsection{6.1 The structural axis is corroborated where anyone has
+looked at low
+flows}\label{the-structural-axis-is-corroborated-where-anyone-has-looked-at-low-flows}
+
+Our central H4 result --- hydrological model structure explains 34--68
+\% of projected low-flow variance, and more than GCM choice in dry
+catchments --- is independently corroborated by the two closest
+decomposition studies, which we did not know the full details of when
+the design was pre-registered. Park et al.~(2025)
+(\citeproc{ref-park2025jhrs}{Park et al. 2025}), decomposing GCM,
+scenario and hydrologic-model uncertainty (GR4J, GR6J, SWAT) for three
+Korean reservoir basins, found hydrologic-model selection explained
+\textbf{21.9--51.9 \% of projected low-flow variance} with pronounced
+site-dependence; Kim and Chung (2026)
+(\citeproc{ref-kimchung2026hess}{Kim and Chung 2026}) found the
+hydrological-model calibration contribution largest precisely in
+\textbf{low-runoff periods} (3.9--9.8 \% overall). The agreement across
+three countries, three model families and different design choices is
+evidence that the phenomenon is real, not an artefact of our
+parameterisation. What our framework adds is the \emph{large-sample}
+dimension (192 catchments rather than 3--4 basins), the \emph{aridity
+stratification} that turns site-dependence into a geographic gradient,
+and the negative finding on tail policy that neither Korean study could
+report because bias correction was not one of their factors.
+
+\subsubsection{6.2 Why structure dominates in dry, hard-rock catchments
+--- and why mean-flow selection cannot see
+it}\label{why-structure-dominates-in-dry-hard-rock-catchments-and-why-mean-flow-selection-cannot-see-it}
+
+The physical reading follows Barker et al.~(2016)
+(\citeproc{ref-barker2016propagation}{Barker et al. 2016}): across 121
+UK catchments, propagation from meteorological to hydrological drought
+is governed by catchment storage properties (baseflow index, productive
+fractured-rock fraction). Peninsular Indian hard-rock basins sit at the
+storage-poor end of that gradient: little deep storage, fast depletion,
+recession limbs shaped almost entirely by the near-surface stores that
+GR4J's production and routing stores and GR6J's exponential-exchange
+branch parameterise differently
+(\citeproc{ref-pushpalatha2011gr6j}{Pushpalatha et al. 2011}). Where
+storage is weak, the structural difference between a four-parameter
+store-and-rout model and the six-parameter low-flow variant is exactly
+what controls whether a meteorological deficit becomes a hydrological
+one --- hence structure \textgreater{} GCM for Q95 and 7-day minima in
+our dry tercile. The mean-flow contrast (structure \textasciitilde3 \%,
+GCM \textasciitilde95 \%) completes the argument: the monsoon flush is
+climate-determined and structure-insensitive, so whole-flow selection
+criteria --- whether forcing skill or whole-flow KGE --- are
+structurally blind to the low-flow uncertainty. This is the
+variance-decomposition restatement of the H1 rank divergence and of
+Sharma et al.'s (2026) (\citeproc{ref-sharma2026hp}{Sharma et al. 2026})
+own observation that low-flow uncertainty exists but went unquantified;
+Ireland's GR4J low-flow projections
+(\citeproc{ref-meresa2022water}{Meresa et al. 2022}) show the same
+low-flow sensitivity to modelled storage in a temperate setting.
+
+\subsubsection{6.3 The tail-policy result: a bounded negative
+finding}\label{the-tail-policy-result-a-bounded-negative-finding}
+
+The \texttt{tail\_policy} factor is negligible (≤ 0.5 \% in every cell),
+which must be read against its own audit history. Quantile-mapping tail
+behaviour is a documented first-order sensitivity in general
+(\citeproc{ref-cannon2015qm}{Cannon et al. 2015};
+\citeproc{ref-themessl2012ecc}{Themeßl et al. 2012}), and our pre-fix
+implementation --- extending both tails with a drizzle-interval slope
+--- produced 4×10⁹ mm/d precipitation events that would have dominated
+any variance decomposition. The verdict is therefore conditional and
+precise: \emph{once the linear extension is per-tail, robustly estimated
+and physically bounded, whether the quantile mapper clamps or
+extrapolates future extremes does not measurably move catchment low-flow
+indicators} --- the low-flow metrics (Q95, 7-day minima, spells) are
+governed by precipitation timing and storage rather than by
+storm-maximum intensity, which is where the two tail policies differ.
+Senatore et al.'s (2022) (\citeproc{ref-senatore2022med}{Senatore et al.
+2022}) finding that bias-correction choice alters projected runoff
+magnitude is consistent: their comparison spanned whole bias-correction
+\emph{methods} and their response was whole-flow runoff; our comparison
+isolates the extreme-tail \emph{design} of one method against low-flow
+responses. The reportable message for practice is that tail-policy
+anxiety, while justified for flood-oriented applications, can be retired
+for low-flow-oriented model selection --- with the pre-fix audit trail
+kept as the warning.
+
+\subsubsection{6.4 The LSTM audit in the context of the ML
+debate}\label{the-lstm-audit-in-the-context-of-the-ml-debate}
+
+Our H5 split --- the benchmark LSTM wins magnitude metrics (0.71--0.95)
+but loses drought-duration fidelity (0.39) --- lands squarely in the
+ML-vs-process debate. The large-sample LSTM literature establishes that
+these models are trained across basins with static attributes and
+evaluated regionally (\citeproc{ref-kratzert2018lstm}{Kratzert et al.
+2018}, \citeproc{ref-kratzert2019regional}{2019}), and the practice
+literature insists they never be trained on single basins
+(\citeproc{ref-kratzert2024nevertrain}{Kratzert et al. 2024}).
+CAMELS-IND-Proj follows that training philosophy, and our audit respects
+it: the benchmark is evaluated on its cross-model medians, the strongest
+defensible configuration. The duration loss is therefore not a training
+artefact to be waved away but a substantive finding about what a smooth,
+observation-constrained surrogate reproduces --- magnitudes well,
+drought spells poorly --- consistent with our conceptual models'
+advantage in storage-mediated spell structure. For the selection
+framework this means the LSTM is a \emph{benchmark object} (Track B),
+not a selectable model: adopting it wholesale would import an unaudited
+dry tail into drought planning, and our process-based audit is exactly
+the evidence the producers' dataset paper invites future users to check.
+
+\subsubsection{6.5 Propagation as a selection
+dimension}\label{propagation-as-a-selection-dimension}
+
+H3's result --- all 22 models reproduce the observed SPI-12→SRI-12 lag
+(propagation share 0.91--0.96), yet mean-flow selection is uncorrelated
+with propagation skill (ρ = −0.350) --- has a dual reading. Positively,
+it confirms that drought propagation at the seasonal scale is a robust,
+model-insensitive property in Peninsular India, echoing Barker et al.'s
+(2016) (\citeproc{ref-barker2016propagation}{Barker et al. 2016})
+storage-controlled mechanism and the short-lag dominance reported for
+the Yangtze under warming (\citeproc{ref-ma2023yangtze}{{Ma et al.}
+2023}); Irish catchments show the same index-based propagation under
+climate change (\citeproc{ref-meresa2023jgr}{Meresa et al. 2023}).
+Negatively, it means propagation reproduction cannot discriminate among
+models \emph{once low-flow skill is evaluated directly} --- the
+selection information it carries is absorbed by the low-flow metric
+layer, which is why the framework keeps the lag as a falsification test
+and a physical-consistency check (mean \textbar SRI−SPI\textbar{}
+0.29--0.34, far from the ≈0.013 near-identity artefact signature) rather
+than as a second ranking axis.
+
+\subsubsection{6.6 What this means for Indian water
+planning}\label{what-this-means-for-indian-water-planning}
+
+The framework's operational output is a shortlist built on the response
+variable that matters. For national-scale applications --- the
+observation-constrained Indian projections
+(\citeproc{ref-chuphal2026obsconstrained}{Chuphal and Mishra 2026}), the
+Drought Atlas ecosystem (\citeproc{ref-chuphal2024droughtatlas}{Chuphal
+et al. 2024}), and the new large-sample datasets
+(\citeproc{ref-mangukiya2025camelsind}{{Mangukiya et al.} 2025};
+\citeproc{ref-singh2026scidata}{{Singh et al.} 2026}) --- the results
+imply that (i) drought-projection uncertainty in dry Peninsular India is
+primarily \emph{hydrological}, so investment in structural evaluation
+and multi-structure ensembles (GR4J/GR6J class) buys more risk reduction
+than enlarging the GCM pool further; (ii) GCM choice still dominates in
+wetter catchments and for whole-flow quantities, so the two-stage logic
+(forcing screen, then low-flow evaluation) retains its place; and (iii)
+single-basin Indian precedents that select GCMs on forcing or ML
+criteria (\citeproc{ref-naresh2026papagni}{Naresh and Mathew 2026}) can
+be strengthened by the same low-flow evaluation at negligible
+computational cost. The decomposition machinery itself is deliberately
+input-agnostic: any future factor (regionalisation scheme, PET method,
+remnant-trend correction) can be added as a level without redesign.
+
+\subsection{7. Limitations}\label{limitations}
 
 \textbf{Fixed GCM factor.} GCM is a fixed factor --- the 14-model
 shortlist is stated, not sampled --- so the H4 shares describe variance
@@ -1115,7 +1397,7 @@ projections translate into water-scarcity statements only with caution
 --- the anthropogenic-drought phase (roadmap Year 4, using CAMELS-IND
 regulation attributes) addresses this and is flagged here, not promised.
 
-\subsection{7. Publication portfolio and
+\subsection{8. Publication portfolio and
 timeline}\label{publication-portfolio-and-timeline}
 
 Planned as 3--4 papers --- full objectives, data dependencies, target
@@ -1157,22 +1439,61 @@ P1+P2 \\
 \end{longtable}
 }
 
-\subsection{8. Literature survey TODO}\label{literature-survey-todo}
+\subsection{9. Literature survey and verification
+status}\label{literature-survey-and-verification-status}
 
-GR4J/airGR origins; EQM variants on unpaired (free-running) series;
-CMIP6 South-Asia evaluation; CAMELS-IND + CAMELS-IND-Proj dataset papers
-and prior applications; KGE interpretability; ECS values for shortlisted
-models; drought-propagation canon (India: Betwa HSJ 2026 --- verify
-80\%/42→63\% figures at camera-ready); Wilby \& Harris 2006
-(\citeproc{ref-wilby2006thames}{Wilby and Harris 2006}) uncertainty
-ordering; IAHS HELPING positioning.
+The full survey --- every reference verified against its publisher page
+on 23 Nov 2026, with the per-paper facts used in §1, §2 and §6 and a
+camera-ready checklist --- lives in
+\textbf{\texttt{LITERATURE\_SURVEY.md}}. Scopus/Web of Science result
+lists require the institutional sign-in in the app browser; coverage and
+citation-count checks are pending and re-runnable at camera-ready under
+that session. Verification highlights:
 
-\textbf{Camera-ready verification list (spec v2 section 8):} Senatore
-2022 full citation; Meresa 2023 and Wang 2025 full citations; Park
-2025's exact factor list (does it include a bias-correction factor?);
-Naresh \& Mathew 2026 journal attribution; Betwa quantitative details
-(80\% decrease, 42→63\%); Liu 2025 complete author list. \#\# Data and
-code availability
+\begin{itemize}
+\tightlist
+\item
+  Park et al.~2025 factor list --- \textbf{verified}: GR4J/GR6J/SWAT;
+  low-flow model-selection shares 51.9/21.9/50.5 \%.
+\item
+  Kim \& Chung 2026 numbers --- \textbf{verified}: calibration 3.9--9.8
+  \% (runoff), 2.7 \% (drought); GCM dominant; 3-way interactions
+  excluded.
+\item
+  Senatore et al.~2022 --- \textbf{verified}: \emph{JHRS} 42:101120, six
+  named authors.
+\item
+  Liu et al.~2025 author list --- \textbf{verified}: Liu, T.; Liu, Y.;
+  Si, Z.; Wang, L.; Zhao, Y.; Wang, J.
+\item
+  ``Wang et al.~2025'' (spec placeholder) --- \textbf{corrected} to Ma
+  et al.~2023, \emph{Int. J. Climatol.} 43:5640 (the placeholder did not
+  resolve).
+\item
+  Naresh \& Mathew 2026 journal --- \textbf{resolved}: \emph{J. Atmos.
+  Solar-Terr. Phys.} (neither HP nor PCE).
+\item
+  CAMELS-IND-Proj --- \textbf{now formally published}: \emph{Sci. Data},
+  doi:10.1038/s41597-026-08858-w (data reference Zenodo 21775597 kept).
+\item
+  CAMELS-IND-Proj itself cites our closest prior art (Sharma et
+  al.~2026) and confirms the five ``good skilled'' CMIP6 models, five of
+  which are in our projection shortlist --- an external consistency
+  point for §4.3.
+\end{itemize}
+
+Remaining \texttt{VERIFY} items: Pushpalatha 2011 end page; Betwa
+figures (80 \% decrease, 42→63 \%); Krishna-basin paper authors; Mishra
+2020 article number; Ma et al.~2023 author list and end page; Scopus/WoS
+citation counts and coverage under the institutional session. (Earlier
+survey topics --- GR4J/airGR origins, EQM variants on free-running
+series, KGE interpretability (\citeproc{ref-gupta2009kge}{Gupta et al.
+2009}), ECS values for the shortlist
+(\citeproc{ref-eyring2016cmip6}{Eyring et al. 2016}), IAHS HELPING
+positioning --- remain open survey threads for the camera-ready pass.)
+
+\subsection{Data and code
+availability}\label{data-and-code-availability}
 
 Reproducible from R Markdown notebooks (\texttt{QED\_00–30},
 \texttt{HYD\_00–30}; phase modules \texttt{LOWFLOW\_*},
@@ -1183,6 +1504,12 @@ tracked in the repo; bulk series regenerated by the notebooks.
 
 \protect\phantomsection\label{refs}
 \begin{CSLReferences}{1}{1}
+\bibitem[\citeproctext]{ref-barker2016propagation}
+Barker, Lucy J., Jamie Hannaford, Alison Chiverton, and Cecilia
+Svensson. 2016. {``From Meteorological to Hydrological Drought Using
+Standardised Indicators.''} \emph{Hydrology and Earth System Sciences}
+20: 2483--505. \url{https://doi.org/10.5194/hess-20-2483-2016}.
+
 \bibitem[\citeproctext]{ref-cannon2015qm}
 Cannon, Alex J., Stephen R. Sobie, and Trevor Q. Murdock. 2015. {``Bias
 Correction of {GCM} Precipitation by Quantile Mapping: How Well Do
@@ -1196,16 +1523,69 @@ Mishra. 2024. {``Drought Atlas of {India}, 1901--2020.''}
 \emph{Scientific Data} 11: 7.
 \url{https://doi.org/10.1038/s41597-023-02862-0}.
 
+\bibitem[\citeproctext]{ref-chuphal2026obsconstrained}
+Chuphal, Dharm Singh, and Vimal Mishra. 2026. {``Observation-Constrained
+Projections Reveal Robust Streamflow Increases in {Indian} Rivers.''}
+\emph{Earth's Future} 14.
+
+\bibitem[\citeproctext]{ref-eyring2016cmip6}
+Eyring, Veronika, Sandrine Bony, Gerald A. Meehl, et al. 2016.
+{``Overview of the Coupled Model Intercomparison Project Phase 6
+({CMIP6}) Experimental Design and Organization.''} \emph{Geoscientific
+Model Development} 9: 1937--58.
+\url{https://doi.org/10.5194/gmd-9-1937-2016}.
+
+\bibitem[\citeproctext]{ref-gudmundsson2012eqm}
+Gudmundsson, Luc, J. B. Bremnes, J. E. Haugen, and T. Engen-Skaugen.
+2012. {``Technical Note: Downscaling {RCM} Precipitation to the Station
+Scale Using Statistical Transformations -- a Comparison of Methods.''}
+\emph{Hydrology and Earth System Sciences} 16: 3383--90.
+\url{https://doi.org/10.5194/hess-16-3383-2012}.
+
+\bibitem[\citeproctext]{ref-gupta2009kge}
+Gupta, Hoshin V., Harald Kling, Kasim K. Yilmaz, and Guillermo F.
+Martinez. 2009. {``Decomposition of the Mean Squared Error and {NSE}
+Performance Criteria: Implications for Improving Hydrological
+Modelling.''} \emph{Journal of Hydrology} 377: 80--91.
+\url{https://doi.org/10.1016/j.jhydrol.2009.08.033}.
+
 \bibitem[\citeproctext]{ref-kimchung2026hess}
 Kim, J. H., and E.-S. Chung. 2026. {``Insights into Uncertainties in
 Future Drought Analysis Using Hydrological Simulation Model.''}
 \emph{Hydrology and Earth System Sciences} 30: 227--47.
 \url{https://doi.org/10.5194/hess-30-227-2026}.
 
+\bibitem[\citeproctext]{ref-kratzert2024nevertrain}
+Kratzert, Frederik, Martin Gauch, Daniel Klotz, and Grey Nearing. 2024.
+{``{HESS Opinions}: Never Train a {Long Short-Term Memory} ({LSTM})
+Network on a Single Basin.''} \emph{Hydrology and Earth System Sciences}
+28: 4187--201. \url{https://doi.org/10.5194/hess-28-4187-2024}.
+
+\bibitem[\citeproctext]{ref-kratzert2018lstm}
+Kratzert, Frederik, Daniel Klotz, Christoph Brenner, Karsten Schulz, and
+Mathias Herrnegger. 2018. {``Rainfall--Runoff Modelling Using {Long
+Short-Term Memory} ({LSTM}) Networks.''} \emph{Hydrology and Earth
+System Sciences} 22: 6005--20.
+\url{https://doi.org/10.5194/hess-22-6005-2018}.
+
+\bibitem[\citeproctext]{ref-kratzert2019regional}
+Kratzert, Frederik, Daniel Klotz, Sepp Hochreiter, and Grey S. Nearing.
+2019. {``Towards Learning Universal, Regional, and Local Hydrological
+Behaviors via Machine Learning Applied to Large-Sample Datasets.''}
+\emph{Hydrology and Earth System Sciences} 23: 5089--111.
+\url{https://doi.org/10.5194/hess-23-5089-2019}.
+
 \bibitem[\citeproctext]{ref-liu2025atmosphere}
-{Liu, T. et al.} 2025. {``Future Streamflow and Hydrological Drought
-Under {CMIP6} Climate Projections.''} \emph{Atmosphere} 16 (6): 691.
+Liu, Tao, Yan Liu, Zhenjiang Si, Longfei Wang, Yusu Zhao, and Jing Wang.
+2025. {``Future Streamflow and Hydrological Drought Under {CMIP6}
+Climate Projections.''} \emph{Atmosphere} 16 (6): 691.
 \url{https://doi.org/10.3390/atmos16060691}.
+
+\bibitem[\citeproctext]{ref-ma2023yangtze}
+{Ma, F. et al.} 2023. {``Intensification of Drought Propagation over the
+{Yangtze River} Basin Under Climate Warming.''} \emph{International
+Journal of Climatology} 43 (12): 5640--58.
+\url{https://doi.org/10.1002/joc.8165}.
 
 \bibitem[\citeproctext]{ref-mangukiya2026wrr}
 {Mangukiya, Nishant Kumar et al.} 2026. {``Benchmarking and Selecting
@@ -1219,10 +1599,29 @@ Attributes for 472 Catchments in Peninsular India.''} \emph{Earth System
 Science Data} 17: 461--91.
 \url{https://doi.org/10.5194/essd-17-461-2025}.
 
+\bibitem[\citeproctext]{ref-meresa2022water}
+Meresa, Hadush, Shaun Donegan, Samaneh Golian, and Conor Murphy. 2022.
+{``Simulated Changes in Seasonal and Low Flows with Climate Change for
+{Irish} Catchments.''} \emph{Water} 14 (10): 1556.
+\url{https://doi.org/10.3390/w14101556}.
+
+\bibitem[\citeproctext]{ref-meresa2023jgr}
+Meresa, Hadush, Conor Murphy, and Shaun Donegan. 2023. {``Propagation
+and Characteristics of Hydrometeorological Drought Under Changing
+Climate in {Irish} Catchments.''} \emph{Journal of Geophysical Research:
+Atmospheres} 128: e2022JD038025.
+\url{https://doi.org/10.1029/2022JD038025}.
+
 \bibitem[\citeproctext]{ref-mishra2020biascorrected}
 Mishra, Vimal, Udit Bhatia, and Aadhar Tiwari. 2020. {``Bias-Corrected
 Climate Projections for {South Asia} from {CMIP6}.''} \emph{Scientific
 Data} 7: 1--13. \url{https://doi.org/10.1038/s41597-020-00681-1}.
+
+\bibitem[\citeproctext]{ref-naresh2026papagni}
+Naresh, C., and A. Mathew. 2026. {``Machine-Learning-Enhanced
+Multi-Model Climate Ensemble for Future Rainfall, Temperature and
+Drought Assessment in the Semi-Arid {Papagni River} Basin, {India}.''}
+\emph{Journal of Atmospheric and Solar-Terrestrial Physics}.
 
 \bibitem[\citeproctext]{ref-park2025jhrs}
 Park, J., J. H. Kim, J. H. Sung, and E. S. Chung. 2025. {``Quantifying
@@ -1231,21 +1630,31 @@ Drought Projection in {South Korea}.''} \emph{Journal of Hydrology:
 Regional Studies} 62: 102991.
 \url{https://doi.org/10.1016/j.ejrh.2025.102991}.
 
+\bibitem[\citeproctext]{ref-pushpalatha2011gr6j}
+Pushpalatha, Raji, Charles Perrin, Nicolas Le Moine, and Vazken
+Andréassian. 2011. {``A Downward Structural Sensitivity Analysis of
+Hydrological Models to Improve Low-Flow Simulation.''} \emph{Journal of
+Hydrology} 411: 66--79.
+\url{https://doi.org/10.1016/j.jhydrol.2011.10.022}.
+
 \bibitem[\citeproctext]{ref-senatore2022med}
-{Senatore, A. et al.} 2022. {``Uncertainty Contributions to Hydrological
-Drought Projection Under Climate Change in the {Mediterranean}.''}
-\emph{VERIFY}.
+Senatore, Alfonso, Domenico Fuoco, Mario Maiolo, Giuseppe Mendicino,
+Gerhard Smiatek, and Harald Kunstmann. 2022. {``Evaluating the
+Uncertainty of Climate Model Structure and Bias Correction on the
+Hydrological Impact of Projected Climate Change in a {Mediterranean}
+Catchment.''} \emph{Journal of Hydrology: Regional Studies} 42: 101120.
+\url{https://doi.org/10.1016/j.ejrh.2022.101120}.
 
 \bibitem[\citeproctext]{ref-sharma2026hp}
 Sharma, V., S. Barbhuiya, and V. Gupta. 2026. {``Projections of Future
 Streamflow for {India} Informed by {CMIP6} Global Climate Models.''}
 \emph{Hydrological Processes} 40 (3): e70476.
 
-\bibitem[\citeproctext]{ref-singh2026camelsindproj}
-Singh, A., N. K. Mangukiya, G. Sahu, and A. Sharma. 2026.
-\emph{{CAMELS-IND-Proj}: Daily Streamflow Projections for 472
-{Peninsular Indian} Catchments Under Future Climate Scenarios}. Zenodo.
-\url{https://doi.org/10.5281/zenodo.21775597}.
+\bibitem[\citeproctext]{ref-singh2026scidata}
+{Singh, A., N. K. Mangukiya, G. Sahu, et al.} 2026.
+{``{CAMELS-IND-Proj}: Daily Streamflow Projections for 472 {Peninsular
+Indian} Catchments Under Future Climate Scenarios.''} \emph{Scientific
+Data}, ahead of print. \url{https://doi.org/10.1038/s41597-026-08858-w}.
 
 \bibitem[\citeproctext]{ref-themessl2012ecc}
 Themeßl, Matthias Jakob, Andreas Gobiet, and Georg Heinrich. 2012.
@@ -1253,12 +1662,6 @@ Themeßl, Matthias Jakob, Andreas Gobiet, and Georg Heinrich. 2012.
 Climate Models and Its Impact on the Climate Change Signal.''}
 \emph{Climatic Change} 112 (2): 449--68.
 \url{https://doi.org/10.1007/s10584-011-0224-4}.
-
-\bibitem[\citeproctext]{ref-wilby2006thames}
-Wilby, Robert L., and Ian Harris. 2006. {``A Framework for Assessing
-Uncertainties in Climate Change Impacts: Low-Flow Scenarios for the
-{River Thames}, {UK}.''} \emph{Water Resources Research} 42: W02419.
-\url{https://doi.org/10.1029/2005WR004065}.
 
 \end{CSLReferences}
 
